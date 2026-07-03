@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEditor } from '../state/store';
-import { timelineDurationMs } from '../engine/timeline';
-import type { ZoomSegment } from '../engine/types';
+import { clipDurationMs, timelineDurationMs } from '../engine/timeline';
+import type { TimelineClip, ZoomSegment } from '../engine/types';
 import { CHAIN_GAP_MS } from '../engine/camera';
 import './TimelinePanel.css';
 
 /** Screen-pixel distance within which a dragged edge snaps to a neighbor's edge. */
 const SNAP_PX = 8;
+
+/** Screen-pixel distance a clip pointer must travel before a press counts as a reorder drag. */
+const CLIP_DRAG_THRESHOLD_PX = 5;
+
+/** Speed presets offered in the clip inspector. */
+const SPEED_PRESETS = [0.5, 1, 1.5, 2, 3];
 
 type ZoomPatch = Partial<Omit<ZoomSegment, 'id'>>;
 
@@ -18,6 +24,17 @@ interface DragState {
   startMs: number;
   endMs: number;
   rampMs: number;
+}
+
+interface ClipDragState {
+  type: 'move' | 'left' | 'right';
+  id: string;
+  startX: number;
+  /** Set once the pointer has moved past the click/drag threshold. */
+  moved: boolean;
+  inMs: number;
+  outMs: number;
+  speed: number;
 }
 
 const TICK_STEPS_MS = [
@@ -116,10 +133,12 @@ export default function TimelinePanel() {
   const project = useEditor((s) => s.project);
   const currentTimeMs = useEditor((s) => s.currentTimeMs);
   const selectedZoomId = useEditor((s) => s.selectedZoomId);
+  const selectedClipId = useEditor((s) => s.selectedClipId);
 
   const stripRef = useRef<HTMLDivElement | null>(null);
   const rulerDragging = useRef(false);
   const dragRef = useRef<DragState | null>(null);
+  const clipDragRef = useRef<ClipDragState | null>(null);
   const [createDrag, setCreateDrag] = useState<{
     pointerId: number;
     anchorMs: number;
@@ -132,9 +151,19 @@ export default function TimelinePanel() {
       const state = useEditor.getState();
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (state.selectedZoomId) state.removeZoom(state.selectedZoomId);
+        else if (state.selectedClipId) state.removeClip(state.selectedClipId);
       } else if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
         state.setPlaying(!state.playing);
+      } else if (e.key === 's' || e.key === 'S') {
+        state.splitClipAt(state.currentTimeMs);
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const step = e.shiftKey ? 1000 : 100;
+        const dir = e.key === 'ArrowLeft' ? -1 : 1;
+        const total = timelineDurationMs(state.project);
+        const next = clamp(state.currentTimeMs + dir * step, 0, total);
+        state.requestSeek(next);
       }
     }
     window.addEventListener('keydown', onKeyDown);
@@ -145,8 +174,18 @@ export default function TimelinePanel() {
 
   if (project.timeline.length === 0 || totalMs <= 0) return null;
 
-  const { requestSeek, setSelectedZoom, updateZoom, removeZoom } = useEditor.getState();
+  const {
+    requestSeek,
+    setSelectedZoom,
+    updateZoom,
+    removeZoom,
+    setSelectedClip,
+    reorderClip,
+    updateClip,
+    removeClip,
+  } = useEditor.getState();
   const selectedZoom = project.zooms.find((z) => z.id === selectedZoomId) ?? null;
+  const selectedClip = project.timeline.find((c) => c.id === selectedClipId) ?? null;
 
   function seekFromClientX(clientX: number) {
     const t = timeFromClientX(clientX);
@@ -181,6 +220,7 @@ export default function TimelinePanel() {
       rampMs: seg.rampMs,
     };
     setSelectedZoom(seg.id);
+    setSelectedClip(null);
   }
 
   function handleBlockPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
@@ -233,6 +273,7 @@ export default function TimelinePanel() {
   function handleTrackPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     if (e.target !== e.currentTarget) return; // blocks handle their own drags
     setSelectedZoom(null);
+    setSelectedClip(null);
     const t = timeFromClientX(e.clientX);
     if (t == null) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -253,11 +294,11 @@ export default function TimelinePanel() {
     let endMs = Math.max(createDrag.anchorMs, createDrag.curMs);
     if (endMs - startMs < 150) return; // treat as a click (deselect already happened)
     endMs = Math.min(Math.max(endMs, startMs + 300), totalMs);
-    
+
     // Check for overlapping zooms
     const overlaps = project.zooms.some((z) => startMs < z.endMs && z.startMs < endMs);
     if (overlaps) return; // don't create overlapping zoom
-    
+
     const { addZoom, setPlaying } = useEditor.getState();
     addZoom({
       startMs,
@@ -293,6 +334,108 @@ export default function TimelinePanel() {
     setPlaying(false);
   }
 
+  function splitAtPlayhead() {
+    const { splitClipAt, currentTimeMs: t } = useEditor.getState();
+    splitClipAt(t);
+  }
+
+  // --- Clip track: positions, drag-to-reorder, edge trim ---
+
+  let clipCursor = 0;
+  const clipPositions = project.timeline.map((clip) => {
+    const dur = clipDurationMs(clip);
+    const startMs = clipCursor;
+    clipCursor += dur;
+    return { clip, startMs, durMs: dur };
+  });
+
+  /** Index (within project.timeline, post-removal ordering) the pointer is currently over. */
+  function clipIndexAtClientX(clientX: number, draggedId: string): number {
+    const rect = stripRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0;
+    const t = clamp(((clientX - rect.left) / rect.width) * totalMs, 0, totalMs);
+    let cursor = 0;
+    let idx = 0;
+    for (const c of project.timeline) {
+      if (c.id === draggedId) continue;
+      const dur = clipDurationMs(c);
+      const mid = cursor + dur / 2;
+      if (t > mid) idx++;
+      cursor += dur;
+    }
+    return idx;
+  }
+
+  function startClipDrag(
+    e: ReactPointerEvent<HTMLDivElement>,
+    clip: TimelineClip,
+    type: ClipDragState['type'],
+  ) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    clipDragRef.current = {
+      type,
+      id: clip.id,
+      startX: e.clientX,
+      moved: false,
+      inMs: clip.inMs,
+      outMs: clip.outMs,
+      speed: clip.speed,
+    };
+    setSelectedClip(clip.id);
+    setSelectedZoom(null);
+  }
+
+  function handleClipPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = clipDragRef.current;
+    if (!drag) return;
+    const rect = stripRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const pxPerMs = rect.width / totalMs;
+    const dxPx = e.clientX - drag.startX;
+    if (!drag.moved && Math.abs(dxPx) > CLIP_DRAG_THRESHOLD_PX) drag.moved = true;
+
+    if (drag.type === 'move') {
+      if (!drag.moved) return; // still within click tolerance; don't reorder yet
+      const fromIndex = project.timeline.findIndex((c) => c.id === drag.id);
+      if (fromIndex === -1) return;
+      const targetIndex = clipIndexAtClientX(e.clientX, drag.id);
+      if (targetIndex !== fromIndex) reorderClip(fromIndex, targetIndex);
+      return;
+    }
+
+    // Trim: convert the pointer's timeline-ms delta to source ms via clip speed,
+    // then let updateClip's own clamping handle bounds.
+    const deltaTimelineMs = dxPx / pxPerMs;
+    const deltaSourceMs = deltaTimelineMs * drag.speed;
+    if (drag.type === 'left') {
+      updateClip(drag.id, { inMs: drag.inMs + deltaSourceMs });
+    } else {
+      updateClip(drag.id, { outMs: drag.outMs + deltaSourceMs });
+    }
+
+    // Seek the preview to the edge being dragged, recomputed from the
+    // post-update store (trimming can shift this clip's own start-relative duration).
+    const updated = useEditor.getState().project;
+    let cursor = 0;
+    for (const c of updated.timeline) {
+      if (c.id === drag.id) {
+        const dur = clipDurationMs(c);
+        requestSeek(drag.type === 'left' ? cursor : cursor + dur);
+        break;
+      }
+      cursor += clipDurationMs(c);
+    }
+  }
+
+  function handleClipPointerUp() {
+    clipDragRef.current = null;
+  }
+
+  function handleClipTrackPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return; // clips handle their own drags
+    setSelectedClip(null);
+  }
+
   const tickInterval = pickTickIntervalMs(totalMs);
   const ticks: number[] = [];
   for (let t = 0; t <= totalMs; t += tickInterval) ticks.push(t);
@@ -323,6 +466,9 @@ export default function TimelinePanel() {
         <button className="btn tp-add-btn" title="Add a zoom segment at the playhead" onClick={addZoomAtPlayhead}>
           + Zoom
         </button>
+        <button className="btn tp-split-btn" title="Split the clip under the playhead (S)" onClick={splitAtPlayhead}>
+          Split
+        </button>
       </div>
       <div className="tp-strip" ref={stripRef}>
         <div
@@ -337,6 +483,46 @@ export default function TimelinePanel() {
               <span className="tp-tick-label">{formatClock(t)}</span>
             </div>
           ))}
+        </div>
+        <div className="tp-clip-track" onPointerDown={handleClipTrackPointerDown}>
+          {clipPositions.map(({ clip, startMs, durMs }) => {
+            const left = (startMs / totalMs) * 100;
+            const width = (durMs / totalMs) * 100;
+            const label =
+              clip.sourceId === null
+                ? `T · ${clip.card?.heading ?? 'Title'}`
+                : (project.sources[clip.sourceId]?.name ?? 'Unknown');
+            return (
+              <div
+                key={clip.id}
+                className={`tp-clip-block${clip.id === selectedClipId ? ' selected' : ''}`}
+                style={{ left: `${left}%`, width: `${width}%` }}
+                onPointerDown={(e) => startClipDrag(e, clip, 'move')}
+                onPointerMove={handleClipPointerMove}
+                onPointerUp={handleClipPointerUp}
+                onPointerCancel={handleClipPointerUp}
+              >
+                <div
+                  className="tp-clip-handle tp-clip-handle-left"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    startClipDrag(e, clip, 'left');
+                  }}
+                />
+                <span className="tp-clip-label">
+                  {label}
+                  {clip.speed !== 1 && <span className="tp-clip-speed-badge">{clip.speed}×</span>}
+                </span>
+                <div
+                  className="tp-clip-handle tp-clip-handle-right"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    startClipDrag(e, clip, 'right');
+                  }}
+                />
+              </div>
+            );
+          })}
         </div>
         <div
           className="tp-track"
@@ -402,54 +588,84 @@ export default function TimelinePanel() {
         />
       </div>
       <aside className="tp-inspector">
-        <label className="slider-label">
-          Zoom {selectedZoom ? selectedZoom.zoom.toFixed(1) : '—'}×
-          <input
-            type="range"
-            min={1.2}
-            max={4}
-            step={0.1}
-            value={selectedZoom?.zoom ?? 1.2}
-            disabled={!selectedZoom}
-            onChange={(e) => selectedZoom && updateZoom(selectedZoom.id, { zoom: Number(e.target.value) })}
-          />
-        </label>
-        <label className="slider-label">
-          Ramp {selectedZoom ? selectedZoom.rampMs : '—'}ms
-          <input
-            type="range"
-            min={100}
-            max={rampMaxMs}
-            step={50}
-            value={selectedZoom ? Math.min(selectedZoom.rampMs, rampMaxMs) : 100}
-            disabled={!selectedZoom}
-            onChange={(e) => {
-              selectedZoom && updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
-            }}
-          />
-        </label>
-        <label className="slider-label">
-          Drift {selectedZoom ? Math.round((selectedZoom.driftPct ?? 0) * 100) : '—'}%
-          <input
-            type="range"
-            min={0}
-            max={8}
-            step={1}
-            value={selectedZoom ? Math.round((selectedZoom.driftPct ?? 0) * 100) : 0}
-            disabled={!selectedZoom}
-            onChange={(e) => {
-              selectedZoom && updateZoom(selectedZoom.id, { driftPct: Number(e.target.value) / 100 });
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          className="btn tp-delete-btn"
-          disabled={!selectedZoom}
-          onClick={() => selectedZoom && removeZoom(selectedZoom.id)}
-        >
-          Delete
-        </button>
+        {selectedClip ? (
+          <>
+            <div className="tp-speed-group">
+              <span className="tp-speed-group-label">Speed</span>
+              {SPEED_PRESETS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`tp-speed-btn${selectedClip.speed === s ? ' active' : ''}`}
+                  onClick={() => updateClip(selectedClip.id, { speed: s })}
+                >
+                  {s}×
+                </button>
+              ))}
+            </div>
+            <span className="tp-hint tp-trim-readout">
+              {formatClock(selectedClip.inMs)} – {formatClock(selectedClip.outMs)}
+            </span>
+            <button
+              type="button"
+              className="btn tp-delete-btn"
+              onClick={() => removeClip(selectedClip.id)}
+            >
+              Delete
+            </button>
+          </>
+        ) : (
+          <>
+            <label className="slider-label">
+              Zoom {selectedZoom ? selectedZoom.zoom.toFixed(1) : '—'}×
+              <input
+                type="range"
+                min={1.2}
+                max={4}
+                step={0.1}
+                value={selectedZoom?.zoom ?? 1.2}
+                disabled={!selectedZoom}
+                onChange={(e) => selectedZoom && updateZoom(selectedZoom.id, { zoom: Number(e.target.value) })}
+              />
+            </label>
+            <label className="slider-label">
+              Ramp {selectedZoom ? selectedZoom.rampMs : '—'}ms
+              <input
+                type="range"
+                min={100}
+                max={rampMaxMs}
+                step={50}
+                value={selectedZoom ? Math.min(selectedZoom.rampMs, rampMaxMs) : 100}
+                disabled={!selectedZoom}
+                onChange={(e) => {
+                  selectedZoom && updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
+                }}
+              />
+            </label>
+            <label className="slider-label">
+              Drift {selectedZoom ? Math.round((selectedZoom.driftPct ?? 0) * 100) : '—'}%
+              <input
+                type="range"
+                min={0}
+                max={8}
+                step={1}
+                value={selectedZoom ? Math.round((selectedZoom.driftPct ?? 0) * 100) : 0}
+                disabled={!selectedZoom}
+                onChange={(e) => {
+                  selectedZoom && updateZoom(selectedZoom.id, { driftPct: Number(e.target.value) / 100 });
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn tp-delete-btn"
+              disabled={!selectedZoom}
+              onClick={() => selectedZoom && removeZoom(selectedZoom.id)}
+            >
+              Delete
+            </button>
+          </>
+        )}
       </aside>
     </div>
   );
