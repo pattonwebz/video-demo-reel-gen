@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import type { Background, FrameChrome, Project, SourceClip, ZoomSegment } from '../engine/types';
+import type { Background, FrameChrome, Project, SourceClip, TimelineClip, ZoomSegment } from '../engine/types';
 import { defaultProject } from '../engine/types';
+import { clipAt } from '../engine/timeline';
 
 let idCounter = 0;
 export function newId(prefix: string): string {
@@ -14,6 +15,8 @@ interface EditorState {
   playing: boolean;
   /** Zoom segment currently under edit (track highlight + inspector). */
   selectedZoomId: string | null;
+  /** Timeline clip currently under edit (clip track highlight + inspector). */
+  selectedClipId: string | null;
   /**
    * One-shot seek request. The Preview owns the <video> element, so scrub/seek
    * consumers write here and Preview applies it to the element and clears it.
@@ -37,15 +40,29 @@ interface EditorState {
   updateZoom: (id: string, patch: Partial<Omit<ZoomSegment, 'id'>>) => void;
   removeZoom: (id: string) => void;
   setSelectedZoom: (id: string | null) => void;
+  setSelectedClip: (id: string | null) => void;
+
+  /** Move the clip at fromIndex to toIndex (both in timeline order). */
+  reorderClip: (fromIndex: number, toIndex: number) => void;
+  /** Patch a clip's trim window / speed, clamped to the source and sane minimums. */
+  updateClip: (id: string, patch: Partial<Pick<TimelineClip, 'inMs' | 'outMs' | 'speed'>>) => void;
+  /** Split the clip under the given timeline time into two at that point. */
+  splitClipAt: (timelineMs: number) => void;
+  removeClip: (id: string) => void;
+
   requestSeek: (ms: number) => void;
   clearSeekRequest: () => void;
 }
+
+/** Minimum clip length in source ms — keeps trims/splits from degenerating. */
+const MIN_CLIP_SOURCE_MS = 100;
 
 export const useEditor = create<EditorState>((set) => ({
   project: defaultProject(),
   currentTimeMs: 0,
   playing: false,
   selectedZoomId: null,
+  selectedClipId: null,
   seekRequest: null,
 
   setCanvasSize: (width, height) =>
@@ -110,6 +127,56 @@ export const useEditor = create<EditorState>((set) => ({
       selectedZoomId: s.selectedZoomId === id ? null : s.selectedZoomId,
     })),
   setSelectedZoom: (selectedZoomId) => set({ selectedZoomId }),
+  setSelectedClip: (selectedClipId) => set({ selectedClipId }),
+
+  reorderClip: (fromIndex, toIndex) =>
+    set((s) => {
+      const timeline = [...s.project.timeline];
+      if (fromIndex < 0 || fromIndex >= timeline.length) return {};
+      const to = Math.max(0, Math.min(timeline.length - 1, toIndex));
+      const [clip] = timeline.splice(fromIndex, 1);
+      timeline.splice(to, 0, clip);
+      return { project: { ...s.project, timeline } };
+    }),
+  updateClip: (id, patch) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        timeline: s.project.timeline.map((c) => {
+          if (c.id !== id) return c;
+          const source = s.project.sources[c.sourceId];
+          const maxOut = source ? source.durationMs : c.outMs;
+          const next = { ...c, ...patch };
+          next.speed = Math.min(4, Math.max(0.25, next.speed));
+          next.inMs = Math.min(Math.max(0, next.inMs), maxOut - MIN_CLIP_SOURCE_MS);
+          next.outMs = Math.min(Math.max(next.outMs, next.inMs + MIN_CLIP_SOURCE_MS), maxOut);
+          return next;
+        }),
+      },
+    })),
+  splitClipAt: (timelineMs) =>
+    set((s) => {
+      const hit = clipAt(s.project, timelineMs);
+      if (!hit) return {};
+      const { clip, sourceTimeMs } = hit;
+      // Refuse splits that would leave a sliver on either side.
+      if (sourceTimeMs < clip.inMs + MIN_CLIP_SOURCE_MS || sourceTimeMs > clip.outMs - MIN_CLIP_SOURCE_MS) return {};
+      const left: TimelineClip = { ...clip, id: newId('tl'), outMs: sourceTimeMs };
+      const right: TimelineClip = { ...clip, id: newId('tl'), inMs: sourceTimeMs };
+      return {
+        project: {
+          ...s.project,
+          timeline: s.project.timeline.flatMap((c) => (c.id === clip.id ? [left, right] : [c])),
+        },
+        selectedClipId: left.id,
+      };
+    }),
+  removeClip: (id) =>
+    set((s) => ({
+      project: { ...s.project, timeline: s.project.timeline.filter((c) => c.id !== id) },
+      selectedClipId: s.selectedClipId === id ? null : s.selectedClipId,
+    })),
+
   requestSeek: (ms) => set({ seekRequest: { ms } }),
   clearSeekRequest: () => set({ seekRequest: null }),
 }));

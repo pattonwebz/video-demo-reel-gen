@@ -1,12 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import { renderFrame } from '../engine/compositor';
+import { clipAt, timelineDurationMs } from '../engine/timeline';
 import { importVideoFile, useEditor } from '../state/store';
 import ZoomOverlay from './ZoomOverlay';
+
+/** Ignore drift below this when deciding whether to re-seek the video element. */
+const SEEK_SLACK_MS = 30;
+
+interface PlaybackCtrl {
+  /** Timeline position — the source of truth the video element follows. */
+  timelineMs: number;
+  /** Timeline clip the video element is currently serving. */
+  boundClipId: string | null;
+  /** Video element must be seeked to match timelineMs before it can advance us. */
+  needsSeek: boolean;
+}
 
 /**
  * Live preview: a hidden <video> is the frame source; a rAF loop runs the
  * compositor into the visible canvas every frame so setting changes are
  * reflected immediately, playing or paused.
+ *
+ * The rAF tick is also the playback controller: it maps timeline time to the
+ * clip under the playhead via clipAt() (trim + speed aware), rebinds/seeks the
+ * video element across clip boundaries, and lets the element drive the
+ * timeline clock only while it is bound and in sync.
  */
 export default function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -17,38 +35,15 @@ export default function Preview() {
   const playing = useEditor((s) => s.playing);
   const setPlaying = useEditor((s) => s.setPlaying);
 
-  const firstClip = project.timeline[0];
-  const source = firstClip ? project.sources[firstClip.sourceId] : null;
+  const hasTimeline = project.timeline.length > 0;
+  const durationMs = timelineDurationMs(project);
 
-  // Keep the hidden video element bound to the active source.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !source) return;
-    if (video.src !== source.url) {
-      video.src = source.url;
-      video.loop = true;
-      video.muted = true; // preview audio comes later; muted allows autoplay
-    }
-  }, [source]);
+  const ctrlRef = useRef<PlaybackCtrl>({
+    timelineMs: useEditor.getState().currentTimeMs,
+    boundClipId: null,
+    needsSeek: true,
+  });
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !source) return;
-    if (playing) void video.play();
-    else video.pause();
-  }, [playing, source]);
-
-  // Apply seek requests (scrubber, zoom placement) to the video element.
-  const seekRequest = useEditor((s) => s.seekRequest);
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || seekRequest == null) return;
-    video.currentTime = seekRequest.ms / 1000;
-    useEditor.getState().clearSeekRequest();
-  }, [seekRequest]);
-
-  // Render loop. Reads the latest project from the store each frame so the
-  // effect never needs to re-subscribe on project edits.
   useEffect(() => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -58,19 +53,77 @@ export default function Preview() {
 
     let raf = 0;
     const tick = () => {
-      const { project: proj } = useEditor.getState();
+      raf = requestAnimationFrame(tick);
+      const state = useEditor.getState();
+      const proj = state.project;
+      const ctrl = ctrlRef.current;
       if (canvas.width !== proj.canvas.width) canvas.width = proj.canvas.width;
       if (canvas.height !== proj.canvas.height) canvas.height = proj.canvas.height;
-      const hasFrame = video.readyState >= 2 && video.videoWidth > 0;
-      const timeMs = video.currentTime * 1000;
+
+      // Scrubber / zoom-placement seeks own the timeline position outright.
+      if (state.seekRequest) {
+        ctrl.timelineMs = state.seekRequest.ms;
+        ctrl.needsSeek = true;
+        state.clearSeekRequest();
+      }
+
+      const totalMs = timelineDurationMs(proj);
+      if (ctrl.timelineMs >= totalMs && totalMs > 0) {
+        // Reached the end: hold the last frame, stop playback.
+        ctrl.timelineMs = Math.max(0, totalMs - 1);
+        ctrl.needsSeek = true;
+        if (state.playing) state.setPlaying(false);
+      }
+      ctrl.timelineMs = Math.max(0, ctrl.timelineMs);
+
+      const hit = clipAt(proj, ctrl.timelineMs);
+      if (hit) {
+        if (ctrl.boundClipId !== hit.clip.id) {
+          ctrl.boundClipId = hit.clip.id;
+          ctrl.needsSeek = true;
+        }
+        if (video.src !== hit.source.url) {
+          video.src = hit.source.url;
+          video.muted = true; // preview audio comes later; muted allows autoplay
+          ctrl.needsSeek = true;
+        }
+        if (video.playbackRate !== hit.clip.speed) video.playbackRate = hit.clip.speed;
+
+        if (ctrl.needsSeek && video.readyState >= 1) {
+          if (Math.abs(video.currentTime * 1000 - hit.sourceTimeMs) > SEEK_SLACK_MS) {
+            video.currentTime = hit.sourceTimeMs / 1000;
+          }
+          ctrl.needsSeek = false;
+        }
+
+        if (state.playing) {
+          if (video.paused) video.play().catch(() => undefined);
+          if (!ctrl.needsSeek) {
+            const srcMs = video.currentTime * 1000;
+            if (srcMs >= hit.clip.outMs) {
+              // Ran off the trim window: hop to the next clip (or the end).
+              ctrl.timelineMs = hit.clipStartMs + (hit.clip.outMs - hit.clip.inMs) / hit.clip.speed;
+              ctrl.needsSeek = true;
+            } else {
+              ctrl.timelineMs = hit.clipStartMs + (srcMs - hit.clip.inMs) / hit.clip.speed;
+            }
+          }
+        } else if (!video.paused) {
+          video.pause();
+        }
+      } else if (!video.paused) {
+        video.pause();
+      }
+
+      const boundToHit = hit !== null && !ctrl.needsSeek && video.src === hit.source.url;
+      const hasFrame = boundToHit && video.readyState >= 2 && video.videoWidth > 0;
       renderFrame(
         ctx,
         proj,
-        timeMs,
+        ctrl.timelineMs,
         hasFrame ? { image: video, width: video.videoWidth, height: video.videoHeight } : null,
       );
-      useEditor.getState().setCurrentTime(timeMs);
-      raf = requestAnimationFrame(tick);
+      if (state.currentTimeMs !== ctrl.timelineMs) state.setCurrentTime(ctrl.timelineMs);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -87,25 +140,26 @@ export default function Preview() {
       onDrop={async (e) => {
         e.preventDefault();
         setDragOver(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file && file.type.startsWith('video/')) await importVideoFile(file);
+        for (const file of Array.from(e.dataTransfer.files ?? [])) {
+          if (file.type.startsWith('video/')) await importVideoFile(file);
+        }
       }}
     >
       <canvas ref={canvasRef} className="preview-canvas" data-testid="preview-canvas" />
       <video ref={videoRef} hidden playsInline />
       <ZoomOverlay canvasRef={canvasRef} />
-      {!source && (
+      {!hasTimeline && (
         <div className="drop-hint">
           <p>Drop an MP4 or WebM here</p>
           <p className="drop-hint-sub">or use “Import video” above</p>
         </div>
       )}
-      {source && (
+      {hasTimeline && (
         <div className="preview-controls">
           <button className="btn" onClick={() => setPlaying(!playing)}>
             {playing ? 'Pause' : 'Play'}
           </button>
-          <TimeReadout durationMs={source.durationMs} />
+          <TimeReadout durationMs={durationMs} />
         </div>
       )}
     </div>
