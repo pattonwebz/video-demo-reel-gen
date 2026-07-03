@@ -33,10 +33,10 @@ Single-page app, fully client-side (no server; files never leave the machine).
 
 ## Task list — milestones (each independently demoable)
 
-- [ ] **M1 — Skeleton + import + styled preview**: Vite app; drop an MP4/webm in; canvas preview with background, padding, rounded corners, shadow; aspect-ratio presets (16:9, square, vertical).
-- [ ] **M2 — Zoom engine**: zoom keyframe track; click-drag on the preview to define a zoom region; eased camera moves; scrubber.
-- [ ] **M3 — Timeline editor**: multi-clip timeline: reorder, trim, split, per-clip speed; zoom/effect segments rendered as blocks on tracks; keyboard shortcuts (space, arrows, s to split).
-- [ ] **M4 — Export**: Mediabunny pipeline to MP4 with audio; progress UI. *Highest-risk milestone; spike right after M1 to de-risk WebCodecs/Mediabunny.*
+- [x] **M1 — Skeleton + import + styled preview**: Vite app; drop an MP4/webm in; canvas preview with background, padding, rounded corners, shadow; aspect-ratio presets (16:9, square, vertical). *(done, verified headless)*
+- [x] **M2 — Zoom engine**: zoom keyframe track; click-drag on the preview to define a zoom region; eased camera moves; scrubber. *(done + extras: drag-create blocks on the track, editable region box on preview, inspector; human-tested by William)*
+- [ ] **M3 — Timeline editor**: multi-clip timeline: reorder, trim, split, per-clip speed; zoom/effect segments rendered as blocks on tracks; keyboard shortcuts (space, arrows, s to split). *(space + delete already done in M2)*
+- [~] **M4 — Export**: Mediabunny pipeline to MP4 with audio; progress UI. *Spike done and verified (single clip, untrimmed, audio passthrough); remaining: multi-clip/trimmed timelines, audio decode/re-encode + mixing, 4K option, export settings UI.*
 - [ ] **M5 — In-app recorder + telemetry + auto-zoom**: record screen+mic, bookmarklet telemetry, auto-generated zoom keyframes, click-ripple overlay.
 - [ ] **M6 — Polish pass**: text/caption overlays, background music with fade, highlight/spotlight effect, synthetic smoothed cursor (needs recording with `cursor: "never"` constraint where supported), project save/load as `.json` + media in OPFS.
 
