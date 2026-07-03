@@ -211,8 +211,19 @@
     white-space: normal;
   }
 
+  .tp-inspector .slider-label input {
+    height: 44px;
+  }
+
   .tp-delete-btn {
     width: 100%;
+    min-height: 44px;
+  }
+
+  .tp-add-btn {
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 13px;
   }
 }
 
