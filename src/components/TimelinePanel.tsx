@@ -184,6 +184,11 @@ export default function TimelinePanel() {
     let endMs = Math.max(createDrag.anchorMs, createDrag.curMs);
     if (endMs - startMs < 150) return; // treat as a click (deselect already happened)
     endMs = Math.min(Math.max(endMs, startMs + 300), totalMs);
+    
+    // Check for overlapping zooms
+    const overlaps = project.zooms.some((z) => startMs < z.endMs && z.startMs < endMs);
+    if (overlaps) return; // don't create overlapping zoom
+    
     const { addZoom, setPlaying } = useEditor.getState();
     addZoom({
       startMs,
@@ -301,39 +306,46 @@ export default function TimelinePanel() {
         />
       </div>
       <aside className="tp-inspector">
-        {selectedZoom ? (
-          <>
-            <label className="slider-label">
-              Zoom {selectedZoom.zoom.toFixed(1)}×
-              <input
-                type="range"
-                min={1.2}
-                max={4}
-                step={0.1}
-                value={selectedZoom.zoom}
-                onChange={(e) => updateZoom(selectedZoom.id, { zoom: Number(e.target.value) })}
-              />
-            </label>
-            <label className="slider-label">
-              Ramp {selectedZoom.rampMs}ms
-              <input
-                type="range"
-                min={100}
-                max={rampMaxMs}
-                step={50}
-                value={Math.min(selectedZoom.rampMs, rampMaxMs)}
-                onChange={(e) => {
-                  updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
-                }}
-              />
-            </label>
-            <button className="btn tp-delete-btn" onClick={() => removeZoom(selectedZoom.id)}>
-              Delete
-            </button>
-          </>
-        ) : (
-          <p className="tp-hint">Drag on the preview to add a zoom</p>
-        )}
+        <div className="tp-inspector-controls">
+          {selectedZoom ? (
+            <>
+              <label className="slider-label">
+                Zoom {selectedZoom.zoom.toFixed(1)}×
+                <input
+                  type="range"
+                  min={1.2}
+                  max={4}
+                  step={0.1}
+                  value={selectedZoom.zoom}
+                  onChange={(e) => updateZoom(selectedZoom.id, { zoom: Number(e.target.value) })}
+                />
+              </label>
+              <label className="slider-label">
+                Ramp {selectedZoom.rampMs}ms
+                <input
+                  type="range"
+                  min={100}
+                  max={rampMaxMs}
+                  step={50}
+                  value={Math.min(selectedZoom.rampMs, rampMaxMs)}
+                  onChange={(e) => {
+                    updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
+                  }}
+                />
+              </label>
+            </>
+          ) : (
+            <p className="tp-hint">Drag on the preview to add a zoom</p>
+          )}
+        </div>
+        <button
+          type="button"
+          className="btn tp-delete-btn"
+          disabled={!selectedZoom}
+          onClick={() => selectedZoom && removeZoom(selectedZoom.id)}
+        >
+          Delete
+        </button>
       </aside>
     </div>
   );

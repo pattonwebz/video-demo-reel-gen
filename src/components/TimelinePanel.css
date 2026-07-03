@@ -143,6 +143,19 @@
   padding: 10px 14px;
 }
 
+.tp-inspector-controls {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.tp-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Sliders sit side by side; kill the global stacked-form margin so the row
    centers vertically inside the short panel. */
 .tp-inspector .slider-label {
@@ -190,9 +203,14 @@
 
   .tp-inspector {
     width: 100%;
+    flex-direction: column;
     border-left: none;
     border-top: 1px solid var(--panel-border);
     padding: 10px 12px;
+  }
+
+  .tp-inspector-controls {
+    width: 100%;
   }
 }
 
