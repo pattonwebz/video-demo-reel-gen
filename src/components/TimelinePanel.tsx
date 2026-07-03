@@ -306,38 +306,32 @@ export default function TimelinePanel() {
         />
       </div>
       <aside className="tp-inspector">
-        <div className="tp-inspector-controls">
-          {selectedZoom ? (
-            <>
-              <label className="slider-label">
-                Zoom {selectedZoom.zoom.toFixed(1)}×
-                <input
-                  type="range"
-                  min={1.2}
-                  max={4}
-                  step={0.1}
-                  value={selectedZoom.zoom}
-                  onChange={(e) => updateZoom(selectedZoom.id, { zoom: Number(e.target.value) })}
-                />
-              </label>
-              <label className="slider-label">
-                Ramp {selectedZoom.rampMs}ms
-                <input
-                  type="range"
-                  min={100}
-                  max={rampMaxMs}
-                  step={50}
-                  value={Math.min(selectedZoom.rampMs, rampMaxMs)}
-                  onChange={(e) => {
-                    updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
-                  }}
-                />
-              </label>
-            </>
-          ) : (
-            <p className="tp-hint">Drag on the preview to add a zoom</p>
-          )}
-        </div>
+        <label className="slider-label">
+          Zoom {selectedZoom ? selectedZoom.zoom.toFixed(1) : '—'}×
+          <input
+            type="range"
+            min={1.2}
+            max={4}
+            step={0.1}
+            value={selectedZoom?.zoom ?? 1.2}
+            disabled={!selectedZoom}
+            onChange={(e) => selectedZoom && updateZoom(selectedZoom.id, { zoom: Number(e.target.value) })}
+          />
+        </label>
+        <label className="slider-label">
+          Ramp {selectedZoom ? selectedZoom.rampMs : '—'}ms
+          <input
+            type="range"
+            min={100}
+            max={rampMaxMs}
+            step={50}
+            value={selectedZoom ? Math.min(selectedZoom.rampMs, rampMaxMs) : 100}
+            disabled={!selectedZoom}
+            onChange={(e) => {
+              selectedZoom && updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
+            }}
+          />
+        </label>
         <button
           type="button"
           className="btn tp-delete-btn"

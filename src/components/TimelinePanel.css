@@ -143,14 +143,6 @@
   padding: 10px 14px;
 }
 
-.tp-inspector-controls {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
 .tp-delete-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -168,6 +160,11 @@
 
 .tp-inspector .slider-label input {
   width: 100%;
+}
+
+.tp-inspector .slider-label input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .tp-hint {
@@ -207,10 +204,6 @@
     border-left: none;
     border-top: 1px solid var(--panel-border);
     padding: 10px 12px;
-  }
-
-  .tp-inspector-controls {
-    width: 100%;
   }
 }
 
