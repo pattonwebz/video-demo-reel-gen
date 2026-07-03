@@ -1,5 +1,6 @@
 import {
   ALL_FORMATS,
+  AudioBufferSource,
   BlobSource,
   BufferTarget,
   CanvasSource,
@@ -13,13 +14,34 @@ import {
 import type { VideoSample } from 'mediabunny';
 import type { Project } from './types';
 import { renderFrame } from './compositor';
-import { clipAt, timelineDurationMs } from './timeline';
+import { clipAt, clipDurationMs, timelineDurationMs } from './timeline';
 
 export interface ExportOptions {
   fps?: number;
   /** Output bitrate in bits/s. */
   videoBitrate?: number;
+  /** Canvas multiplier: 1 = project size (1080p default), 2 = 4K. */
+  scale?: number;
   onProgress?: (fraction: number) => void;
+}
+
+const MIX_SAMPLE_RATE = 48000;
+const AUDIO_BITRATE = 128_000;
+
+/** Scale the canvas (and its pixel-denominated settings) for hi-res export. */
+function scaleProject(project: Project, scale: number): Project {
+  if (scale === 1) return project;
+  const c = project.canvas;
+  return {
+    ...project,
+    canvas: {
+      ...c,
+      width: Math.round(c.width * scale),
+      height: Math.round(c.height * scale),
+      cornerRadius: c.cornerRadius * scale,
+      shadow: { ...c.shadow, blur: c.shadow.blur * scale, offsetY: c.shadow.offsetY * scale },
+    },
+  };
 }
 
 /**
@@ -37,9 +59,11 @@ export async function exportProject(
   opts: ExportOptions = {},
 ): Promise<Blob> {
   const fps = opts.fps ?? 30;
-  const videoBitrate = opts.videoBitrate ?? 8_000_000;
+  const scale = opts.scale ?? 1;
+  const videoBitrate = opts.videoBitrate ?? (scale > 1 ? 24_000_000 : 8_000_000);
   const durationMs = timelineDurationMs(project);
   if (durationMs <= 0) throw new Error('Timeline is empty');
+  project = scaleProject(project, scale);
 
   // Open one Input + frame sink per distinct source used on the timeline.
   const inputs = new Map<string, { input: Input; sink: VideoSampleSink | null }>();
@@ -63,7 +87,9 @@ export async function exportProject(
   const videoSource = new CanvasSource(canvas, { codec: 'avc', bitrate: videoBitrate });
   output.addVideoTrack(videoSource, { frameRate: fps });
 
-  const audio = await prepareAudioPassthrough(project, inputs, output);
+  const audio =
+    (await prepareAudioPassthrough(project, inputs, output)) ??
+    (await prepareAudioMix(project, blobs, output));
 
   await output.start();
 
@@ -162,6 +188,63 @@ async function prepareAudioPassthrough(
         );
         first = false;
       }
+      source.close();
+    },
+  };
+}
+
+/**
+ * General audio path for anything passthrough can't handle: decode each
+ * contributing source in full (decodeAudioData), schedule the clips' trim
+ * windows into an OfflineAudioContext at their timeline positions (which
+ * also resamples and mixes down to 48kHz stereo), and re-encode as AAC.
+ * Speed ≠ 1 clips and title cards contribute silence — pitch-preserving
+ * time-stretch is out of scope, and chipmunk audio is worse than none.
+ */
+async function prepareAudioMix(
+  project: Project,
+  blobs: Map<string, Blob>,
+  output: Output,
+): Promise<{ pump: (endS: number) => Promise<void> } | null> {
+  const contributors = project.timeline.filter((c) => c.sourceId !== null && c.speed === 1);
+  if (contributors.length === 0) return null;
+
+  const decoded = new Map<string, AudioBuffer>();
+  for (const clip of contributors) {
+    const sourceId = clip.sourceId as string;
+    if (decoded.has(sourceId)) continue;
+    const blob = blobs.get(sourceId);
+    if (!blob) continue;
+    try {
+      const decodeCtx = new OfflineAudioContext(2, 1, MIX_SAMPLE_RATE);
+      decoded.set(sourceId, await decodeCtx.decodeAudioData(await blob.arrayBuffer()));
+    } catch {
+      // Source has no audio track (or an undecodable one) — contributes silence.
+    }
+  }
+  if (decoded.size === 0) return null;
+
+  const totalS = timelineDurationMs(project) / 1000;
+  const mixCtx = new OfflineAudioContext(2, Math.ceil(totalS * MIX_SAMPLE_RATE), MIX_SAMPLE_RATE);
+  let cursorS = 0;
+  for (const clip of project.timeline) {
+    const durS = clipDurationMs(clip) / 1000;
+    const buffer = clip.sourceId !== null && clip.speed === 1 ? decoded.get(clip.sourceId) : undefined;
+    if (buffer) {
+      const node = mixCtx.createBufferSource();
+      node.buffer = buffer;
+      node.connect(mixCtx.destination);
+      node.start(cursorS, clip.inMs / 1000, durS);
+    }
+    cursorS += durS;
+  }
+  const rendered = await mixCtx.startRendering();
+
+  const source = new AudioBufferSource({ codec: 'aac', bitrate: AUDIO_BITRATE });
+  output.addAudioTrack(source);
+  return {
+    pump: async () => {
+      await source.add(rendered);
       source.close();
     },
   };
