@@ -3,7 +3,11 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEditor } from '../state/store';
 import { timelineDurationMs } from '../engine/timeline';
 import type { ZoomSegment } from '../engine/types';
+import { CHAIN_GAP_MS } from '../engine/camera';
 import './TimelinePanel.css';
+
+/** Screen-pixel distance within which a dragged edge snaps to a neighbor's edge. */
+const SNAP_PX = 8;
 
 type ZoomPatch = Partial<Omit<ZoomSegment, 'id'>>;
 
@@ -36,6 +40,63 @@ function formatClock(ms: number): string {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
+}
+
+/** Snaps a single dragged edge (ms) to the nearest neighboring segment's edge within thresholdMs. */
+function snapEdgeMs(
+  zooms: ZoomSegment[],
+  id: string,
+  edgeMs: number,
+  thresholdMs: number,
+): number {
+  let best = edgeMs;
+  let bestDelta = thresholdMs;
+  for (const z of zooms) {
+    if (z.id === id) continue;
+    const dStart = Math.abs(edgeMs - z.startMs);
+    if (dStart <= bestDelta) {
+      bestDelta = dStart;
+      best = z.startMs;
+    }
+    const dEnd = Math.abs(edgeMs - z.endMs);
+    if (dEnd <= bestDelta) {
+      bestDelta = dEnd;
+      best = z.endMs;
+    }
+  }
+  return best;
+}
+
+/**
+ * Snaps whichever edge of a moving block (start or end) is closer to a
+ * neighbor's facing edge, returning the adjusted start that preserves duration.
+ */
+function snapMoveMs(
+  zooms: ZoomSegment[],
+  id: string,
+  start: number,
+  end: number,
+  thresholdMs: number,
+): number {
+  const dur = end - start;
+  let bestDelta = thresholdMs;
+  let snappedStart = start;
+  for (const z of zooms) {
+    if (z.id === id) continue;
+    // Moving block's left edge approaching a neighbor's right edge.
+    const dStart = Math.abs(start - z.endMs);
+    if (dStart <= bestDelta) {
+      bestDelta = dStart;
+      snappedStart = z.endMs;
+    }
+    // Moving block's right edge approaching a neighbor's left edge.
+    const dEnd = Math.abs(end - z.startMs);
+    if (dEnd <= bestDelta) {
+      bestDelta = dEnd;
+      snappedStart = z.startMs - dur;
+    }
+  }
+  return snappedStart;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -130,19 +191,27 @@ export default function TimelinePanel() {
     const pxPerMs = rect.width / totalMs;
     const deltaMs = (e.clientX - drag.startX) / pxPerMs;
     const minDur = Math.max(300, 2 * drag.rampMs);
+    const snapThresholdMs = SNAP_PX / pxPerMs;
+    const zooms = project.zooms;
 
     if (drag.type === 'move') {
       const dur = drag.endMs - drag.startMs;
-      const newStart = clamp(drag.startMs + deltaMs, 0, totalMs - dur);
+      const rawStart = drag.startMs + deltaMs;
+      const snappedStart = snapMoveMs(zooms, drag.id, rawStart, rawStart + dur, snapThresholdMs);
+      const newStart = clamp(snappedStart, 0, totalMs - dur);
       updateZoom(drag.id, { startMs: newStart, endMs: newStart + dur });
     } else if (drag.type === 'left') {
-      const newStart = clamp(drag.startMs + deltaMs, 0, drag.endMs - minDur);
+      const rawStart = drag.startMs + deltaMs;
+      const snappedStart = snapEdgeMs(zooms, drag.id, rawStart, snapThresholdMs);
+      const newStart = clamp(snappedStart, 0, drag.endMs - minDur);
       const newDur = drag.endMs - newStart;
       const patch: ZoomPatch = { startMs: newStart };
       if (newDur < 2 * drag.rampMs) patch.rampMs = newDur / 2;
       updateZoom(drag.id, patch);
     } else {
-      const newEnd = clamp(drag.endMs + deltaMs, drag.startMs + minDur, totalMs);
+      const rawEnd = drag.endMs + deltaMs;
+      const snappedEnd = snapEdgeMs(zooms, drag.id, rawEnd, snapThresholdMs);
+      const newEnd = clamp(snappedEnd, drag.startMs + minDur, totalMs);
       const newDur = newEnd - drag.startMs;
       const patch: ZoomPatch = { endMs: newEnd };
       if (newDur < 2 * drag.rampMs) patch.rampMs = newDur / 2;
@@ -231,6 +300,23 @@ export default function TimelinePanel() {
   const selectedZoomDurationMs = selectedZoom ? selectedZoom.endMs - selectedZoom.startMs : 0;
   const rampMaxMs = selectedZoom ? Math.max(100, Math.min(1500, selectedZoomDurationMs / 2)) : 0;
 
+  // Adjacent segments whose gap is within CHAIN_GAP_MS pan directly between
+  // regions (see camera.ts). Mark the touching edges and draw a bridge so the
+  // user can see the two blocks are linked.
+  const chainedRightIds = new Set<string>();
+  const chainedLeftIds = new Set<string>();
+  const chainBridges: { key: string; atMs: number }[] = [];
+  const sortedZooms = [...project.zooms].sort((a, b) => a.startMs - b.startMs);
+  for (let i = 0; i < sortedZooms.length - 1; i++) {
+    const a = sortedZooms[i];
+    const b = sortedZooms[i + 1];
+    if (b.startMs - a.endMs <= CHAIN_GAP_MS) {
+      chainedRightIds.add(a.id);
+      chainedLeftIds.add(b.id);
+      chainBridges.push({ key: `${a.id}_${b.id}`, atMs: (a.endMs + b.startMs) / 2 });
+    }
+  }
+
   return (
     <div className="tp-panel">
       <div className="tp-actions">
@@ -268,13 +354,23 @@ export default function TimelinePanel() {
               }}
             />
           )}
+          {chainBridges.map((b) => (
+            <div
+              key={b.key}
+              className="tp-chain-bridge"
+              style={{ left: `${(b.atMs / totalMs) * 100}%` }}
+            />
+          ))}
           {project.zooms.map((seg) => {
             const left = (seg.startMs / totalMs) * 100;
             const width = ((seg.endMs - seg.startMs) / totalMs) * 100;
+            const chainClass =
+              (chainedRightIds.has(seg.id) ? ' chain-right' : '') +
+              (chainedLeftIds.has(seg.id) ? ' chain-left' : '');
             return (
               <div
                 key={seg.id}
-                className={`tp-zoom-block${seg.id === selectedZoomId ? ' selected' : ''}`}
+                className={`tp-zoom-block${seg.id === selectedZoomId ? ' selected' : ''}${chainClass}`}
                 style={{ left: `${left}%`, width: `${width}%` }}
                 onPointerDown={(e) => startBlockDrag(e, seg, 'move')}
                 onPointerMove={handleBlockPointerMove}
@@ -329,6 +425,20 @@ export default function TimelinePanel() {
             disabled={!selectedZoom}
             onChange={(e) => {
               selectedZoom && updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
+            }}
+          />
+        </label>
+        <label className="slider-label">
+          Drift {selectedZoom ? Math.round((selectedZoom.driftPct ?? 0) * 100) : '—'}%
+          <input
+            type="range"
+            min={0}
+            max={8}
+            step={1}
+            value={selectedZoom ? Math.round((selectedZoom.driftPct ?? 0) * 100) : 0}
+            disabled={!selectedZoom}
+            onChange={(e) => {
+              selectedZoom && updateZoom(selectedZoom.id, { driftPct: Number(e.target.value) / 100 });
             }}
           />
         </label>

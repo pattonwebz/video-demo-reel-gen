@@ -4,6 +4,9 @@
   flex-shrink: 0;
   border-top: 1px solid var(--panel-border);
   background: var(--panel);
+  /* Brighter accent variant for the chain indicator, so linked zoom edges
+     read as distinct from the plain selection outline (var(--accent)). */
+  --accent-bright: #a7bcff;
 }
 
 .tp-actions {
@@ -101,6 +104,36 @@
   border-color: var(--accent);
 }
 
+/* Marks the edge of a block that chains directly into its neighbor (gap <=
+   CHAIN_GAP_MS): the camera pans straight across instead of resetting to
+   full frame, so the touching edges get a brighter accent highlight. */
+.tp-zoom-block.chain-right {
+  box-shadow: inset -3px 0 0 0 var(--accent-bright);
+}
+
+.tp-zoom-block.chain-left {
+  box-shadow: inset 3px 0 0 0 var(--accent-bright);
+}
+
+.tp-zoom-block.chain-right.chain-left {
+  box-shadow:
+    inset -3px 0 0 0 var(--accent-bright),
+    inset 3px 0 0 0 var(--accent-bright);
+}
+
+/* Small connector rendered at the boundary between two chained blocks. */
+.tp-chain-bridge {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  width: 10px;
+  transform: translateX(-50%);
+  background: var(--accent-bright);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .tp-zoom-label {
   font-size: 11px;
   color: var(--text);
@@ -134,7 +167,7 @@
 }
 
 .tp-inspector {
-  width: 380px;
+  width: 500px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
