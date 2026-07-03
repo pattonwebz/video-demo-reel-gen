@@ -16,4 +16,7 @@ Running log of build progress, findings, and decisions. Newest entries at the bo
 
 ## M1 — Skeleton + import + styled preview
 
-- [ ] In progress.
+- Scaffolded: tsconfigs (vite react-ts style), `src/engine/` (types, compositor, camera, easing), `src/state/store.ts` (Zustand), preview UI (drop zone + import button, rAF render loop, play/pause + time readout), settings panel (aspect presets, 6 background presets, padding/radius/shadow sliders). Plain CSS dark theme.
+- Design note: camera/zoom math (eased zoom segments → source crop) implemented in the engine already since the model was clear — M2 only needs UI (drag-to-define region, scrubber, track). Compositor is pure `(ctx, project, timeMs, frame)`; preview and export share it.
+- `npm run build` (tsc + vite) passes.
+- Verification harness: `scripts/verify.mjs` boots vite + headless system Chrome via playwright-core; `scripts/verify-m1.mjs` imports an ffmpeg-generated 5s test clip, pixel-checks background vs video content, playback advance, aspect preset switch. Screenshots → `test-output/`.
