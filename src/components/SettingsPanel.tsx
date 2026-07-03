@@ -1,12 +1,41 @@
-import { useState } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import { ASPECT_PRESETS, BACKGROUND_PRESETS } from '../engine/types';
-import { useEditor } from '../state/store';
+import type { ChromeStyle } from '../engine/types';
+import { backgroundImages } from '../engine/assets';
+import { useEditor, newId } from '../state/store';
+
+const CHROME_OPTIONS: { value: ChromeStyle; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'mac', label: 'macOS' },
+  { value: 'browser', label: 'Browser' },
+  { value: 'phone', label: 'Phone' },
+];
 
 export default function SettingsPanel() {
   const [collapsed, setCollapsed] = useState(false);
   const canvas = useEditor((s) => s.project.canvas);
-  const { setCanvasSize, setBackground, setPadding, setCornerRadius, setShadowOpacity } =
-    useEditor.getState();
+  const {
+    setCanvasSize,
+    setBackground,
+    setPadding,
+    setCornerRadius,
+    setShadowOpacity,
+    setChrome,
+    setZoomVignette,
+    setDefaultDriftPct,
+  } = useEditor.getState();
+
+  const bg = canvas.background;
+
+  async function handleImageFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const bitmap = await createImageBitmap(file);
+    const id = newId('bgimg');
+    backgroundImages.set(id, bitmap);
+    setBackground({ type: 'image', imageId: id });
+  }
 
   return (
     <aside className={`settings-panel${collapsed ? ' collapsed' : ''}`}>
@@ -57,7 +86,78 @@ export default function SettingsPanel() {
                 onClick={() => setBackground(p.bg)}
               />
             ))}
+            <button
+              type="button"
+              title="Frame blur background"
+              className={`swatch swatch-blur${bg.type === 'frame-blur' ? ' active' : ''}`}
+              onClick={() => setBackground({ type: 'frame-blur', blurPx: 60, brightness: 0.7 })}
+            />
+            <label
+              title="Image background"
+              className={`swatch swatch-img${bg.type === 'image' ? ' active' : ''}`}
+            >
+              Img
+              <input
+                type="file"
+                accept="image/*"
+                className="file-input-hidden"
+                onChange={(e) => {
+                  void handleImageFile(e);
+                }}
+              />
+            </label>
           </div>
+          {bg.type === 'frame-blur' && (
+            <>
+              <label className="slider-label">
+                Blur
+                <input
+                  type="range"
+                  min={20}
+                  max={120}
+                  step={5}
+                  value={bg.blurPx}
+                  onChange={(e) => setBackground({ ...bg, blurPx: Number(e.target.value) })}
+                />
+              </label>
+              <label className="slider-label">
+                Brightness
+                <input
+                  type="range"
+                  min={40}
+                  max={100}
+                  step={5}
+                  value={Math.round(bg.brightness * 100)}
+                  onChange={(e) => setBackground({ ...bg, brightness: Number(e.target.value) / 100 })}
+                />
+              </label>
+            </>
+          )}
+        </section>
+
+        <section>
+          <h2>Chrome</h2>
+          <div className="chip-row">
+            {CHROME_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`chip${canvas.chrome.style === opt.value ? ' active' : ''}`}
+                onClick={() => setChrome({ ...canvas.chrome, style: opt.value })}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {canvas.chrome.style === 'browser' && (
+            <input
+              type="text"
+              className="text-input"
+              placeholder="example.com"
+              value={canvas.chrome.urlText ?? ''}
+              onChange={(e) => setChrome({ ...canvas.chrome, urlText: e.target.value })}
+            />
+          )}
         </section>
 
         <section>
@@ -94,6 +194,25 @@ export default function SettingsPanel() {
               value={canvas.shadow.opacity}
               onChange={(e) => setShadowOpacity(Number(e.target.value))}
             />
+          </label>
+          <label className="slider-label">
+            Zoom vignette
+            <input
+              type="range"
+              min={0}
+              max={40}
+              step={5}
+              value={Math.round(canvas.zoomVignette * 100)}
+              onChange={(e) => setZoomVignette(Number(e.target.value) / 100)}
+            />
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={canvas.defaultDriftPct > 0}
+              onChange={(e) => setDefaultDriftPct(e.target.checked ? 0.03 : 0)}
+            />
+            Drift during holds <span className="hint">(new zooms)</span>
           </label>
         </section>
       </div>

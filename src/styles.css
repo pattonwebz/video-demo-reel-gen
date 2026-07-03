@@ -194,6 +194,73 @@ body {
   border-color: var(--accent);
 }
 
+.swatch-blur {
+  background: linear-gradient(135deg, #4c5670, #232733);
+  filter: blur(1px);
+}
+
+.swatch-img {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.text-input {
+  display: block;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.text-input::placeholder {
+  color: var(--text-dim);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.checkbox-label input[type='checkbox'] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
 .slider-label {
   display: flex;
   flex-direction: column;
@@ -296,6 +363,20 @@ body {
   .swatch {
     width: 44px;
     height: 44px;
+  }
+
+  .text-input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .checkbox-label {
+    min-height: 44px;
+  }
+
+  .checkbox-label input[type='checkbox'] {
+    width: 22px;
+    height: 22px;
   }
 
   .settings-panel-header {
