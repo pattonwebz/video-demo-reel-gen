@@ -58,6 +58,12 @@ export const useEditor = create<EditorState>((set) => ({
   setPlaying: (playing) => set({ playing }),
 }));
 
+/**
+ * Media bytes by source id. Kept outside the store because blobs aren't
+ * serializable project state (M6 moves persistence to OPFS).
+ */
+export const mediaBlobs = new Map<string, Blob>();
+
 /** Probe a media file for duration/dimensions and register it as a source clip. */
 export async function importVideoFile(file: File): Promise<SourceClip> {
   const url = URL.createObjectURL(file);
@@ -70,6 +76,7 @@ export async function importVideoFile(file: File): Promise<SourceClip> {
     width: meta.width,
     height: meta.height,
   };
+  mediaBlobs.set(clip.id, file);
   useEditor.getState().addSource(clip);
   return clip;
 }

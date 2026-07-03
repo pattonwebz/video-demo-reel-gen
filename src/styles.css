@@ -200,3 +200,6 @@ body {
 .btn:hover {
   filter: brightness(1.1);
 }
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+.export-error { color: #ff7b7b; font-size: 12px; max-width: 320px; }

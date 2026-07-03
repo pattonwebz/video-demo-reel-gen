@@ -10,6 +10,7 @@ import {
   Output,
   VideoSampleSink,
 } from 'mediabunny';
+import type { VideoSample } from 'mediabunny';
 import type { Project } from './types';
 import { renderFrame } from './compositor';
 import { clipAt, timelineDurationMs } from './timeline';
@@ -67,26 +68,44 @@ export async function exportProject(
   await output.start();
 
   const totalFrames = Math.ceil((durationMs / 1000) * fps);
-  for (let i = 0; i < totalFrames; i++) {
+  const emit = async (i: number, sample: VideoSample | null) => {
     const tMs = (i / fps) * 1000;
-    const hit = clipAt(project, tMs);
-    let frame = null;
-    if (hit) {
-      const sink = inputs.get(hit.clip.sourceId)?.sink;
-      const sample = await sink?.getSample(hit.sourceTimeMs / 1000);
-      if (sample) {
-        frame = {
-          image: sample.toCanvasImageSource(),
-          width: sample.displayWidth,
-          height: sample.displayHeight,
-          close: () => sample.close(),
-        };
-      }
-    }
-    renderFrame(ctx, project, tMs, frame);
-    frame?.close();
+    renderFrame(
+      ctx,
+      project,
+      tMs,
+      sample
+        ? { image: sample.toCanvasImageSource(), width: sample.displayWidth, height: sample.displayHeight }
+        : null,
+    );
+    sample?.close();
     await videoSource.add(tMs / 1000, 1 / fps);
     opts.onProgress?.((i + 1) / totalFrames);
+  };
+
+  // Walk output frames grouped into contiguous runs on the same timeline clip,
+  // so each run can decode sequentially via samplesAtTimestamps (decodes each
+  // packet once) instead of getSample per frame (re-decodes from the previous
+  // keyframe every call — unusably slow on long-GOP screen recordings).
+  let i = 0;
+  while (i < totalFrames) {
+    const hit = clipAt(project, (i / fps) * 1000);
+    const sink = hit ? inputs.get(hit.clip.sourceId)?.sink : null;
+    const sourceTimes: number[] = [];
+    let end = i;
+    while (end < totalFrames) {
+      const h = clipAt(project, (end / fps) * 1000);
+      if (h?.clip !== hit?.clip) break;
+      sourceTimes.push(h ? h.sourceTimeMs / 1000 : 0);
+      end++;
+    }
+    if (sink) {
+      for await (const sample of sink.samplesAtTimestamps(sourceTimes)) {
+        await emit(i++, sample);
+      }
+    }
+    // Gap frames (or a sourceless run) render as background only.
+    while (i < end) await emit(i++, null);
   }
   videoSource.close();
 
@@ -129,10 +148,18 @@ async function prepareAudioPassthrough(
 
   return {
     pump: async (endS: number) => {
+      // AAC streams often start slightly negative (encoder priming); the MP4
+      // muxer rejects negative timestamps, so shift the whole stream to 0.
+      let shiftS: number | null = null;
       let first = true;
       for await (const packet of packetSink.packets()) {
-        if (packet.timestamp > endS) break;
-        await source.add(packet, first ? { decoderConfig } : undefined);
+        shiftS ??= Math.max(0, -packet.timestamp);
+        const ts = packet.timestamp + shiftS;
+        if (ts > endS) break;
+        await source.add(
+          shiftS > 0 ? packet.clone({ timestamp: ts }) : packet,
+          first ? { decoderConfig } : undefined,
+        );
         first = false;
       }
       source.close();

@@ -20,3 +20,13 @@ Running log of build progress, findings, and decisions. Newest entries at the bo
 - Design note: camera/zoom math (eased zoom segments → source crop) implemented in the engine already since the model was clear — M2 only needs UI (drag-to-define region, scrubber, track). Compositor is pure `(ctx, project, timeMs, frame)`; preview and export share it.
 - `npm run build` (tsc + vite) passes.
 - Verification harness: `scripts/verify.mjs` boots vite + headless system Chrome via playwright-core; `scripts/verify-m1.mjs` imports an ffmpeg-generated 5s test clip, pixel-checks background vs video content, playback advance, aspect preset switch. Screenshots → `test-output/`.
+
+## Export spike (M4 de-risk, done between M1 and M2)
+
+- Session 2026-07-03 (part 1) ended mid-verification (laptop battery); resumed and finished same day.
+- `src/engine/export.ts`: Mediabunny pipeline — BlobSource input → VideoSampleSink decode → shared `renderFrame` compositor on OffscreenCanvas → CanvasSource H.264 encode → Mp4Output. Audio passthrough for the single-clip/untrimmed/speed-1 case; M4 adds decode/re-encode. `mediaBlobs` map in store keeps raw bytes outside serializable state (OPFS in M6).
+- **Perf bug found & fixed**: `getSample(t)` per output frame re-decodes from the previous keyframe every call → ~1 fps export (unusably slow on long-GOP sources, which screen recordings are). Rewrote the frame loop to batch contiguous same-clip frame runs through `samplesAtTimestamps()` (decodes each packet once) → ~10 fps at 1080p in headless Chrome.
+- **Muxer bug found & fixed**: AAC first-packet timestamp is slightly negative (encoder priming, e.g. −0.023s); Mp4 muxer throws on negative timestamps. Pump now shifts the whole audio stream so it starts at 0, preserving packet spacing.
+- Verified: `scripts/verify-export.mjs` (import clip → click Export → capture download → ffprobe): mp4 container, h264 1920×1080, aac audio, duration ≈5s; extracted mid-video frame shows correct composite and exact frame timing (burnt-in timecode matches).
+- Test clips: generate with `ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=5" -f lavfi -i "sine=frequency=440:duration=5" -c:v libx264 -pix_fmt yuv420p -c:a aac out.mp4` (audio needed — verify-export asserts an aac track).
+- Conclusion: WebCodecs/Mediabunny path de-risked; M4 risk retired. Next: M2 (zoom engine UI).
