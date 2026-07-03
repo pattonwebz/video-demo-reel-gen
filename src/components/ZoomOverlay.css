@@ -16,14 +16,30 @@
   overflow: hidden;
 }
 
-/* Target region of the selected zoom segment. */
+/* Target region of the selected zoom segment: drag to move, corners resize. */
 .zo-selection {
   position: absolute;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
   border: 2px dashed var(--accent);
   border-radius: 4px;
   background: rgba(108, 140, 255, 0.08);
 }
+
+.zo-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border-radius: 3px;
+  touch-action: none;
+}
+
+.zo-handle-nw { top: -2px; left: -2px; cursor: nwse-resize; }
+.zo-handle-se { bottom: -2px; right: -2px; cursor: nwse-resize; }
+.zo-handle-ne { top: -2px; right: -2px; cursor: nesw-resize; }
+.zo-handle-sw { bottom: -2px; left: -2px; cursor: nesw-resize; }
 
 .zo-selection-label {
   position: absolute;

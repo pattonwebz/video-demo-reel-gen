@@ -24,6 +24,26 @@ interface DragState {
 /** Drags shorter than this in either axis (client px) are treated as a click, not a zoom. */
 const CLICK_THRESHOLD_PX = 8;
 
+type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
+
+/**
+ * Move/resize drag on the selected segment's region box. Geometry is frozen at
+ * drag start: if the edited segment is currently driving the camera, live
+ * updates would otherwise shift the crop (and thus the pointer mapping) under
+ * the cursor mid-drag.
+ */
+interface EditDrag {
+  pointerId: number;
+  mode: 'move' | 'resize';
+  segId: string;
+  startX: number;
+  startY: number;
+  orig: { cx: number; cy: number; zoom: number };
+  geo: FrameGeometry;
+  /** Normalized source-space corner the resize is anchored to (opposite the handle). */
+  anchor?: { x: number; y: number };
+}
+
 /** Where the video frame currently sits, in both client px (for hit-testing/layout)
  * and canvas-internal px (for mapping into source-video space). */
 interface FrameGeometry {
@@ -89,11 +109,13 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
   const currentTimeMs = useEditor((s) => s.currentTimeMs);
   const selectedZoomId = useEditor((s) => s.selectedZoomId);
   const addZoom = useEditor((s) => s.addZoom);
+  const updateZoom = useEditor((s) => s.updateZoom);
   const setPlaying = useEditor((s) => s.setPlaying);
   const requestSeek = useEditor((s) => s.requestSeek);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const editDragRef = useRef<EditDrag | null>(null);
   const [frameBox, setFrameBox] = useState<{ left: number; top: number; width: number; height: number } | null>(
     null,
   );
@@ -139,15 +161,20 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
     };
   }, [canvasRef, source, project]);
 
-  // Escape cancels an in-progress drag.
+  // Escape cancels an in-progress marquee, or reverts an in-progress box edit.
   useEffect(() => {
-    if (!drag) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDrag(null);
+      if (e.key !== 'Escape') return;
+      setDrag(null);
+      const d = editDragRef.current;
+      if (d) {
+        updateZoom(d.segId, d.orig);
+        editDragRef.current = null;
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [drag]);
+  }, [updateZoom]);
 
   const handlePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -238,6 +265,82 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
     [drag, canvasRef, project, currentTimeMs, source, addZoom, setPlaying, requestSeek],
   );
 
+  /** Maps a client point to normalized source coords through a frozen geometry. */
+  function clientToSourceNorm(clientX: number, clientY: number, geo: FrameGeometry) {
+    const pt = clientToCanvasPx(clientX, clientY, geo);
+    const { frameRect, crop, srcW, srcH } = geo;
+    return {
+      x: clamp((crop.sx + ((pt.x - frameRect.x) / frameRect.w) * crop.sw) / srcW, 0, 1),
+      y: clamp((crop.sy + ((pt.y - frameRect.y) / frameRect.h) * crop.sh) / srcH, 0, 1),
+    };
+  }
+
+  function startBoxDrag(
+    e: ReactPointerEvent<HTMLDivElement>,
+    mode: EditDrag['mode'],
+    corner?: ResizeCorner,
+  ) {
+    if (e.button !== 0) return;
+    const canvas = canvasRef.current;
+    const seg = selectedSeg;
+    if (!canvas || !source || !seg) return;
+    e.stopPropagation(); // don't start a marquee on the hitzone underneath
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const geo = computeGeometry(canvas, project, currentTimeMs, source);
+    let anchor: EditDrag['anchor'];
+    if (mode === 'resize' && corner) {
+      const t = poseToSourceCrop({ cx: seg.cx, cy: seg.cy, zoom: seg.zoom }, geo.srcW, geo.srcH);
+      anchor = {
+        x: (corner === 'nw' || corner === 'sw' ? t.sx + t.sw : t.sx) / geo.srcW,
+        y: (corner === 'nw' || corner === 'ne' ? t.sy + t.sh : t.sy) / geo.srcH,
+      };
+    }
+    editDragRef.current = {
+      pointerId: e.pointerId,
+      mode,
+      segId: seg.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      orig: { cx: seg.cx, cy: seg.cy, zoom: seg.zoom },
+      geo,
+      anchor,
+    };
+  }
+
+  function handleBoxPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = editDragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    const { geo } = d;
+    if (d.mode === 'move') {
+      const dxNorm =
+        (((e.clientX - d.startX) * (geo.canvas.width / geo.canvasRect.width)) / geo.frameRect.w) *
+        (geo.crop.sw / geo.srcW);
+      const dyNorm =
+        (((e.clientY - d.startY) * (geo.canvas.height / geo.canvasRect.height)) / geo.frameRect.h) *
+        (geo.crop.sh / geo.srcH);
+      const half = 1 / (2 * d.orig.zoom);
+      updateZoom(d.segId, {
+        cx: clamp(d.orig.cx + dxNorm, half, 1 - half),
+        cy: clamp(d.orig.cy + dyNorm, half, 1 - half),
+      });
+    } else if (d.anchor) {
+      const pt = clientToSourceNorm(e.clientX, e.clientY, geo);
+      const w = Math.max(Math.abs(pt.x - d.anchor.x), 0.02);
+      const h = Math.max(Math.abs(pt.y - d.anchor.y), 0.02);
+      const zoom = clamp(Math.min(1 / w, 1 / h), 1.2, 4);
+      const half = 1 / (2 * zoom);
+      updateZoom(d.segId, {
+        zoom,
+        cx: clamp(d.anchor.x + Math.sign(pt.x - d.anchor.x) * half, half, 1 - half),
+        cy: clamp(d.anchor.y + Math.sign(pt.y - d.anchor.y) * half, half, 1 - half),
+      });
+    }
+  }
+
+  function endBoxDrag(e: ReactPointerEvent<HTMLDivElement>) {
+    if (editDragRef.current?.pointerId === e.pointerId) editDragRef.current = null;
+  }
+
   if (!hasTimeline) return null;
 
   // Selected segment's target region in hitzone-local px: the segment's own
@@ -282,8 +385,25 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
           onPointerCancel={handlePointerCancel}
         >
           {selectionStyle && selectedSeg && (
-            <div className="zo-selection" style={selectionStyle}>
+            <div
+              className="zo-selection"
+              style={selectionStyle}
+              onPointerDown={(e) => startBoxDrag(e, 'move')}
+              onPointerMove={handleBoxPointerMove}
+              onPointerUp={endBoxDrag}
+              onPointerCancel={endBoxDrag}
+            >
               <span className="zo-selection-label">{selectedSeg.zoom.toFixed(1)}×</span>
+              {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                <div
+                  key={corner}
+                  className={`zo-handle zo-handle-${corner}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    startBoxDrag(e, 'resize', corner);
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>
