@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEditor } from '../state/store';
 import { timelineDurationMs } from '../engine/timeline';
@@ -59,6 +59,11 @@ export default function TimelinePanel() {
   const stripRef = useRef<HTMLDivElement | null>(null);
   const rulerDragging = useRef(false);
   const dragRef = useRef<DragState | null>(null);
+  const [createDrag, setCreateDrag] = useState<{
+    pointerId: number;
+    anchorMs: number;
+    curMs: number;
+  } | null>(null);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -83,10 +88,8 @@ export default function TimelinePanel() {
   const selectedZoom = project.zooms.find((z) => z.id === selectedZoomId) ?? null;
 
   function seekFromClientX(clientX: number) {
-    const rect = stripRef.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0) return;
-    const x = clamp(clientX - rect.left, 0, rect.width);
-    requestSeek((x / rect.width) * totalMs);
+    const t = timeFromClientX(clientX);
+    if (t != null) requestSeek(t);
   }
 
   function handleRulerPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
@@ -151,6 +154,52 @@ export default function TimelinePanel() {
     dragRef.current = null;
   }
 
+  function timeFromClientX(clientX: number): number | null {
+    const rect = stripRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return null;
+    return clamp(((clientX - rect.left) / rect.width) * totalMs, 0, totalMs);
+  }
+
+  // Dragging on empty track space sketches out a new zoom block.
+  function handleTrackPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return; // blocks handle their own drags
+    setSelectedZoom(null);
+    const t = timeFromClientX(e.clientX);
+    if (t == null) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setCreateDrag({ pointerId: e.pointerId, anchorMs: t, curMs: t });
+  }
+
+  function handleTrackPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!createDrag || e.pointerId !== createDrag.pointerId) return;
+    const t = timeFromClientX(e.clientX);
+    if (t == null) return;
+    setCreateDrag((d) => (d ? { ...d, curMs: t } : d));
+  }
+
+  function handleTrackPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!createDrag || e.pointerId !== createDrag.pointerId) return;
+    setCreateDrag(null);
+    const startMs = Math.min(createDrag.anchorMs, createDrag.curMs);
+    let endMs = Math.max(createDrag.anchorMs, createDrag.curMs);
+    if (endMs - startMs < 150) return; // treat as a click (deselect already happened)
+    endMs = Math.min(Math.max(endMs, startMs + 300), totalMs);
+    const { addZoom, setPlaying } = useEditor.getState();
+    addZoom({
+      startMs,
+      endMs,
+      rampMs: Math.min(500, (endMs - startMs) / 3),
+      cx: 0.5,
+      cy: 0.5,
+      zoom: 2,
+    });
+    setPlaying(false);
+  }
+
+  function handleTrackPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
+    if (createDrag && e.pointerId === createDrag.pointerId) setCreateDrag(null);
+  }
+
   function addZoomAtPlayhead() {
     const { addZoom, setPlaying, currentTimeMs: t } = useEditor.getState();
     let startMs = t;
@@ -197,10 +246,20 @@ export default function TimelinePanel() {
         </div>
         <div
           className="tp-track"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) setSelectedZoom(null);
-          }}
+          onPointerDown={handleTrackPointerDown}
+          onPointerMove={handleTrackPointerMove}
+          onPointerUp={handleTrackPointerUp}
+          onPointerCancel={handleTrackPointerCancel}
         >
+          {createDrag && (
+            <div
+              className="tp-zoom-ghost"
+              style={{
+                left: `${(Math.min(createDrag.anchorMs, createDrag.curMs) / totalMs) * 100}%`,
+                width: `${(Math.abs(createDrag.curMs - createDrag.anchorMs) / totalMs) * 100}%`,
+              }}
+            />
+          )}
           {project.zooms.map((seg) => {
             const left = (seg.startMs / totalMs) * 100;
             const width = ((seg.endMs - seg.startMs) / totalMs) * 100;
