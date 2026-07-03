@@ -223,6 +223,9 @@ export default function TimelinePanel() {
   const ticks: number[] = [];
   for (let t = 0; t <= totalMs; t += tickInterval) ticks.push(t);
 
+  const selectedZoomDurationMs = selectedZoom ? selectedZoom.endMs - selectedZoom.startMs : 0;
+  const rampMaxMs = selectedZoom ? Math.max(100, Math.min(1500, selectedZoomDurationMs / 2)) : 0;
+
   return (
     <div className="tp-panel">
       <div className="tp-actions">
@@ -316,12 +319,11 @@ export default function TimelinePanel() {
               <input
                 type="range"
                 min={100}
-                max={1500}
+                max={rampMaxMs}
                 step={50}
-                value={selectedZoom.rampMs}
+                value={Math.min(selectedZoom.rampMs, rampMaxMs)}
                 onChange={(e) => {
-                  const half = (selectedZoom.endMs - selectedZoom.startMs) / 2;
-                  updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), half) });
+                  updateZoom(selectedZoom.id, { rampMs: Math.min(Number(e.target.value), rampMaxMs) });
                 }}
               />
             </label>
