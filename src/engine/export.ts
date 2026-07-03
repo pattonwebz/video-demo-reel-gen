@@ -13,7 +13,7 @@ import {
 } from 'mediabunny';
 import type { VideoSample } from 'mediabunny';
 import type { Project } from './types';
-import { renderFrame } from './compositor';
+import { renderFrame, renderFrameMotionBlur } from './compositor';
 import { clipAt, clipDurationMs, timelineDurationMs } from './timeline';
 
 export interface ExportOptions {
@@ -22,6 +22,8 @@ export interface ExportOptions {
   videoBitrate?: number;
   /** Canvas multiplier: 1 = project size (1080p default), 2 = 4K. */
   scale?: number;
+  /** Average sub-samples across fast camera ramps (export-only; preview never blurs). */
+  motionBlur?: boolean;
   onProgress?: (fraction: number) => void;
 }
 
@@ -96,14 +98,11 @@ export async function exportProject(
   const totalFrames = Math.ceil((durationMs / 1000) * fps);
   const emit = async (i: number, sample: VideoSample | null) => {
     const tMs = (i / fps) * 1000;
-    renderFrame(
-      ctx,
-      project,
-      tMs,
-      sample
-        ? { image: sample.toCanvasImageSource(), width: sample.displayWidth, height: sample.displayHeight }
-        : null,
-    );
+    const frame = sample
+      ? { image: sample.toCanvasImageSource(), width: sample.displayWidth, height: sample.displayHeight }
+      : null;
+    if (opts.motionBlur) renderFrameMotionBlur(ctx, project, tMs, frame, fps);
+    else renderFrame(ctx, project, tMs, frame);
     sample?.close();
     await videoSource.add(tMs / 1000, 1 / fps);
     opts.onProgress?.((i + 1) / totalFrames);

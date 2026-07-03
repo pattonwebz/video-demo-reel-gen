@@ -171,6 +171,38 @@ function relativeLuminance(hex: string): number {
   return (0.2126 * ((n >> 16) & 0xff) + 0.7152 * ((n >> 8) & 0xff) + 0.0722 * (n & 0xff)) / 255;
 }
 
+/**
+ * Export-only motion blur: when the camera pose moves fast between output
+ * frames, render a few sub-samples across the frame interval and average
+ * them (k-th pass at alpha 1/k gives a uniform mean without a clear pass).
+ * Sub-samples reuse the same decoded source frame — this blurs camera
+ * motion, not source motion — so it costs draws, not decodes.
+ */
+export function renderFrameMotionBlur(
+  ctx: Ctx2D,
+  project: Project,
+  timeMs: number,
+  frame: FrameSource | null,
+  fps: number,
+  subsamples = 3,
+): void {
+  const dtMs = 1000 / fps;
+  const a = cameraAt(project.zooms, Math.max(0, timeMs - dtMs));
+  const b = cameraAt(project.zooms, timeMs);
+  // Screen-space movement estimate: pan shift is magnified by zoom; zoom
+  // change contributes its relative rate.
+  const movement = Math.hypot(b.cx - a.cx, b.cy - a.cy) * b.zoom + Math.abs(b.zoom - a.zoom) / b.zoom;
+  if (!frame || movement < 0.01) {
+    renderFrame(ctx, project, timeMs, frame);
+    return;
+  }
+  for (let k = 0; k < subsamples; k++) {
+    ctx.globalAlpha = 1 / (k + 1);
+    renderFrame(ctx, project, timeMs - dtMs * (1 - (k + 1) / subsamples), frame);
+  }
+  ctx.globalAlpha = 1;
+}
+
 /** Layout of the video card: fitted inside padding, centered, chrome-aware. */
 export function frameLayout(project: Project, srcW: number, srcH: number): FrameLayout {
   const { width: W, height: H, padding, chrome } = project.canvas;
