@@ -4,9 +4,10 @@ dist/
 .DS_Store
 test-output/
 .idea/
-
-# Internal development notes
+# Internal development & planning notes (kept locally only)
 PROGRESS.md
+PLAN.md
+*.claude.md
 *.claide.md
 
 # Dependencies
