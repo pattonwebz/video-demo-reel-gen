@@ -165,3 +165,54 @@
 .tp-delete-btn {
   flex-shrink: 0;
 }
+
+@media (max-width: 960px) {
+  .tp-panel {
+    height: auto;
+    flex-direction: column;
+  }
+
+  .tp-actions {
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  .tp-actions::before {
+    display: none;
+  }
+
+  .tp-strip {
+    padding: 10px 8px;
+  }
+
+  .tp-inspector {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 700px) {
+  .tp-track {
+    height: 40px;
+  }
+
+  .tp-inspector {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tp-inspector .slider-label {
+    min-width: 140px;
+    white-space: normal;
+  }
+
+  .tp-delete-btn {
+    width: 100%;
+  }
+}
+
