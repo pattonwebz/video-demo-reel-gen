@@ -87,6 +87,7 @@ function insideFrame(pt: { x: number; y: number }, frameRect: FrameGeometry['fra
 export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
   const project = useEditor((s) => s.project);
   const currentTimeMs = useEditor((s) => s.currentTimeMs);
+  const selectedZoomId = useEditor((s) => s.selectedZoomId);
   const addZoom = useEditor((s) => s.addZoom);
   const setPlaying = useEditor((s) => s.setPlaying);
   const requestSeek = useEditor((s) => s.requestSeek);
@@ -239,6 +240,25 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
 
   if (!hasTimeline) return null;
 
+  // Selected segment's target region in hitzone-local px: the segment's own
+  // crop rect expressed relative to whatever crop the camera currently shows.
+  const selectedSeg = selectedZoomId ? project.zooms.find((z) => z.id === selectedZoomId) : null;
+  let selectionStyle: CSSProperties | null = null;
+  if (selectedSeg && source && frameBox) {
+    const crop = poseToSourceCrop(cameraAt(project.zooms, currentTimeMs), source.width, source.height);
+    const target = poseToSourceCrop(
+      { cx: selectedSeg.cx, cy: selectedSeg.cy, zoom: selectedSeg.zoom },
+      source.width,
+      source.height,
+    );
+    selectionStyle = {
+      left: ((target.sx - crop.sx) / crop.sw) * frameBox.width,
+      top: ((target.sy - crop.sy) / crop.sh) * frameBox.height,
+      width: (target.sw / crop.sw) * frameBox.width,
+      height: (target.sh / crop.sh) * frameBox.height,
+    };
+  }
+
   let marqueeStyle: CSSProperties | null = null;
   if (drag && rootRef.current) {
     const rootRect = rootRef.current.getBoundingClientRect();
@@ -260,7 +280,13 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
           onPointerMove={handlePointerMove}
           onPointerUp={finishDrag}
           onPointerCancel={handlePointerCancel}
-        />
+        >
+          {selectionStyle && selectedSeg && (
+            <div className="zo-selection" style={selectionStyle}>
+              <span className="zo-selection-label">{selectedSeg.zoom.toFixed(1)}×</span>
+            </div>
+          )}
+        </div>
       )}
       {marqueeStyle && <div className="zo-marquee" style={marqueeStyle} />}
     </div>

@@ -12,6 +12,29 @@
   position: absolute;
   pointer-events: auto;
   cursor: crosshair;
+  /* Clip the selection box when the camera is zoomed past its region. */
+  overflow: hidden;
+}
+
+/* Target region of the selected zoom segment. */
+.zo-selection {
+  position: absolute;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  background: rgba(108, 140, 255, 0.08);
+}
+
+.zo-selection-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(20, 22, 28, 0.75);
+  border-radius: 4px;
+  padding: 1px 5px;
+  user-select: none;
 }
 
 .zo-marquee {

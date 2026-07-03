@@ -151,12 +151,36 @@ export default function TimelinePanel() {
     dragRef.current = null;
   }
 
+  function addZoomAtPlayhead() {
+    const { addZoom, setPlaying, currentTimeMs: t } = useEditor.getState();
+    let startMs = t;
+    let durMs = Math.min(2000, totalMs - startMs);
+    if (durMs < 600) {
+      startMs = clamp(totalMs - 600, 0, startMs);
+      durMs = Math.min(600, totalMs - startMs);
+    }
+    addZoom({
+      startMs,
+      endMs: startMs + durMs,
+      rampMs: Math.min(500, durMs / 3),
+      cx: 0.5,
+      cy: 0.5,
+      zoom: 2,
+    });
+    setPlaying(false);
+  }
+
   const tickInterval = pickTickIntervalMs(totalMs);
   const ticks: number[] = [];
   for (let t = 0; t <= totalMs; t += tickInterval) ticks.push(t);
 
   return (
     <div className="tp-panel">
+      <div className="tp-actions">
+        <button className="btn tp-add-btn" title="Add a zoom segment at the playhead" onClick={addZoomAtPlayhead}>
+          + Zoom
+        </button>
+      </div>
       <div className="tp-strip" ref={stripRef}>
         <div
           className="tp-ruler"
@@ -171,7 +195,12 @@ export default function TimelinePanel() {
             </div>
           ))}
         </div>
-        <div className="tp-track">
+        <div
+          className="tp-track"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) setSelectedZoom(null);
+          }}
+        >
           {project.zooms.map((seg) => {
             const left = (seg.startMs / totalMs) * 100;
             const width = ((seg.endMs - seg.startMs) / totalMs) * 100;
