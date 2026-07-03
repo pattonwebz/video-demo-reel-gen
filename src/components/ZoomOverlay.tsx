@@ -63,9 +63,9 @@ interface FrameGeometry {
  * boundary) so the overlay still has something to size against. */
 function resolveActiveSource(project: Project, currentTimeMs: number): SourceClip | null {
   const hit = clipAt(project, currentTimeMs);
-  if (hit) return hit.source;
+  if (hit) return hit.source; // null for title cards — overlay hides
   const first = project.timeline[0];
-  return first ? (project.sources[first.sourceId] ?? null) : null;
+  return first && first.sourceId !== null ? (project.sources[first.sourceId] ?? null) : null;
 }
 
 function computeGeometry(

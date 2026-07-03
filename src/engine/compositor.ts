@@ -1,7 +1,8 @@
-import type { Background, FrameChrome, Project } from './types';
+import type { Background, FrameChrome, Project, TitleCard } from './types';
 import { backgroundImages } from './assets';
 import { cameraAt, poseToSourceCrop } from './camera';
-import { clamp } from './easing';
+import { clipAt, clipDurationMs, transitionAt } from './timeline';
+import { clamp, cubicInOut } from './easing';
 
 export interface FrameSource {
   image: CanvasImageSource;
@@ -49,15 +50,51 @@ function bezelWidth(chrome: FrameChrome, W: number, H: number): number {
 export function renderFrame(ctx: Ctx2D, project: Project, timeMs: number, frame: FrameSource | null): void {
   const { width: W, height: H } = project.canvas;
   paintBackground(ctx, project.canvas.background, W, H, frame);
+
+  const hit = clipAt(project, timeMs);
+  if (hit && hit.clip.sourceId === null && hit.clip.card) {
+    // Title cards paint text straight on the background; their own entrance/
+    // exit animation stands in for any dip transition at their boundaries.
+    paintTitleCard(
+      ctx,
+      hit.clip.card,
+      timeMs - hit.clipStartMs,
+      clipDurationMs(hit.clip),
+      W,
+      H,
+      project.canvas.background,
+    );
+    return;
+  }
   if (!frame) return;
 
-  const { frameRect, videoRect } = frameLayout(project, frame.width, frame.height);
+  // Dip transitions fade (and optionally shrink) the card into the
+  // background around a clip boundary; at the cut itself it is invisible,
+  // which also hides the preview's source-switch latency.
+  let dipAlpha = 1;
+  let dipScale = 1;
+  const trans = transitionAt(project, timeMs);
+  if (trans) {
+    const e = cubicInOut(clamp(Math.abs(trans.p), 0, 1));
+    dipAlpha = e;
+    if (trans.type === 'dip-scale') dipScale = 0.85 + 0.15 * e;
+    if (dipAlpha < 0.005) return;
+  }
+
+  let { frameRect, videoRect } = frameLayout(project, frame.width, frame.height);
   const { cornerRadius, shadow, chrome } = project.canvas;
-  const s = chromeScale(W, H);
-  const baseRadius = chrome.style === 'phone' ? Math.max(cornerRadius, 40 * s) : cornerRadius;
+  const s = chromeScale(W, H) * dipScale;
+  if (dipScale !== 1) {
+    const cx = frameRect.x + frameRect.w / 2;
+    const cy = frameRect.y + frameRect.h / 2;
+    frameRect = scaleRectAbout(frameRect, dipScale, cx, cy);
+    videoRect = scaleRectAbout(videoRect, dipScale, cx, cy);
+  }
+  const baseRadius = chrome.style === 'phone' ? Math.max(cornerRadius, 40 * s) : cornerRadius * dipScale;
   const radius = Math.min(baseRadius, frameRect.w / 2, frameRect.h / 2);
 
   ctx.save();
+  ctx.globalAlpha = dipAlpha;
   ctx.shadowColor = `rgba(0,0,0,${shadow.opacity})`;
   ctx.shadowBlur = shadow.blur;
   ctx.shadowOffsetY = shadow.offsetY;
@@ -77,6 +114,61 @@ export function renderFrame(ctx: Ctx2D, project: Project, timeMs: number, frame:
   paintPhoneNotch(ctx, chrome, videoRect, s);
   paintVignette(ctx, project.canvas.zoomVignette, pose.zoom, videoRect);
   ctx.restore();
+  ctx.restore();
+}
+
+function scaleRectAbout(r: Rect, scale: number, cx: number, cy: number): Rect {
+  return { x: cx + (r.x - cx) * scale, y: cy + (r.y - cy) * scale, w: r.w * scale, h: r.h * scale };
+}
+
+const CARD_FONT = `-apple-system, 'Segoe UI', Roboto, sans-serif`;
+const CARD_IN_MS = 500;
+const CARD_OUT_MS = 300;
+
+function paintTitleCard(
+  ctx: Ctx2D,
+  card: TitleCard,
+  localMs: number,
+  durMs: number,
+  W: number,
+  H: number,
+  bg: Background,
+): void {
+  let alpha = 1;
+  let rise = 0;
+  if (localMs < CARD_IN_MS) {
+    const u = cubicInOut(clamp(localMs / CARD_IN_MS, 0, 1));
+    alpha = u;
+    rise = (1 - u) * 20 * (H / 1080);
+  } else if (durMs - localMs < CARD_OUT_MS) {
+    alpha = cubicInOut(clamp((durMs - localMs) / CARD_OUT_MS, 0, 1));
+  }
+
+  // White text unless the background is a light solid.
+  const color = bg.type === 'solid' && relativeLuminance(bg.color) > 0.6 ? '#16181d' : '#ffffff';
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cy = H / 2 + rise;
+  ctx.font = `600 ${Math.round(H * 0.07)}px ${CARD_FONT}`;
+  ctx.fillText(card.heading, W / 2, card.sub ? cy - H * 0.03 : cy);
+  if (card.sub) {
+    ctx.globalAlpha = alpha * 0.7;
+    ctx.font = `400 ${Math.round(H * 0.035)}px ${CARD_FONT}`;
+    ctx.fillText(card.sub, W / 2, cy + H * 0.05);
+  }
+  ctx.restore();
+}
+
+/** Approximate relative luminance (0–1) of a #rrggbb color. */
+function relativeLuminance(hex: string): number {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0;
+  const n = parseInt(m[1], 16);
+  return (0.2126 * ((n >> 16) & 0xff) + 0.7152 * ((n >> 8) & 0xff) + 0.0722 * (n & 0xff)) / 255;
 }
 
 /** Layout of the video card: fitted inside padding, centered, chrome-aware. */

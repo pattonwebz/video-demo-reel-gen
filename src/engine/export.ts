@@ -44,7 +44,7 @@ export async function exportProject(
   // Open one Input + frame sink per distinct source used on the timeline.
   const inputs = new Map<string, { input: Input; sink: VideoSampleSink | null }>();
   for (const clip of project.timeline) {
-    if (inputs.has(clip.sourceId)) continue;
+    if (clip.sourceId === null || inputs.has(clip.sourceId)) continue; // title cards have no media
     const blob = blobs.get(clip.sourceId);
     if (!blob) throw new Error(`No media blob for source ${clip.sourceId}`);
     const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
@@ -90,7 +90,7 @@ export async function exportProject(
   let i = 0;
   while (i < totalFrames) {
     const hit = clipAt(project, (i / fps) * 1000);
-    const sink = hit ? inputs.get(hit.clip.sourceId)?.sink : null;
+    const sink = hit?.clip.sourceId != null ? (inputs.get(hit.clip.sourceId)?.sink ?? null) : null;
     const sourceTimes: number[] = [];
     let end = i;
     while (end < totalFrames) {
@@ -129,7 +129,7 @@ async function prepareAudioPassthrough(
 ): Promise<{ pump: (endS: number) => Promise<void> } | null> {
   if (project.timeline.length !== 1) return null;
   const clip = project.timeline[0];
-  if (clip.speed !== 1 || clip.inMs > 1) return null;
+  if (clip.sourceId === null || clip.speed !== 1 || clip.inMs > 1) return null;
 
   const entry = inputs.get(clip.sourceId);
   if (!entry) return null;

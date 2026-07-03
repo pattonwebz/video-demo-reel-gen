@@ -14,6 +14,8 @@ interface PlaybackCtrl {
   boundClipId: string | null;
   /** Video element must be seeked to match timelineMs before it can advance us. */
   needsSeek: boolean;
+  /** performance.now() of the previous tick — wall clock for sourceless (title-card) clips. */
+  lastTickAt: number | null;
 }
 
 /**
@@ -42,6 +44,7 @@ export default function Preview() {
     timelineMs: useEditor.getState().currentTimeMs,
     boundClipId: null,
     needsSeek: true,
+    lastTickAt: null,
   });
 
   useEffect(() => {
@@ -76,46 +79,57 @@ export default function Preview() {
       }
       ctrl.timelineMs = Math.max(0, ctrl.timelineMs);
 
+      const now = performance.now();
+      const wallDtMs = ctrl.lastTickAt === null ? 0 : now - ctrl.lastTickAt;
+      ctrl.lastTickAt = now;
+
       const hit = clipAt(proj, ctrl.timelineMs);
       if (hit) {
         if (ctrl.boundClipId !== hit.clip.id) {
           ctrl.boundClipId = hit.clip.id;
           ctrl.needsSeek = true;
         }
-        if (video.src !== hit.source.url) {
-          video.src = hit.source.url;
-          video.muted = true; // preview audio comes later; muted allows autoplay
-          ctrl.needsSeek = true;
-        }
-        if (video.playbackRate !== hit.clip.speed) video.playbackRate = hit.clip.speed;
-
-        if (ctrl.needsSeek && video.readyState >= 1) {
-          if (Math.abs(video.currentTime * 1000 - hit.sourceTimeMs) > SEEK_SLACK_MS) {
-            video.currentTime = hit.sourceTimeMs / 1000;
+        const source = hit.source;
+        if (source === null) {
+          // Title card: no media to serve; the wall clock advances the timeline.
+          if (!video.paused) video.pause();
+          if (state.playing) ctrl.timelineMs += wallDtMs;
+        } else {
+          if (video.src !== source.url) {
+            video.src = source.url;
+            video.muted = true; // preview audio comes later; muted allows autoplay
+            ctrl.needsSeek = true;
           }
-          ctrl.needsSeek = false;
-        }
+          if (video.playbackRate !== hit.clip.speed) video.playbackRate = hit.clip.speed;
 
-        if (state.playing) {
-          if (video.paused) video.play().catch(() => undefined);
-          if (!ctrl.needsSeek) {
-            const srcMs = video.currentTime * 1000;
-            if (srcMs >= hit.clip.outMs) {
-              // Ran off the trim window: hop to the next clip (or the end).
-              ctrl.timelineMs = hit.clipStartMs + (hit.clip.outMs - hit.clip.inMs) / hit.clip.speed;
-              ctrl.needsSeek = true;
-            } else {
-              ctrl.timelineMs = hit.clipStartMs + (srcMs - hit.clip.inMs) / hit.clip.speed;
+          if (ctrl.needsSeek && video.readyState >= 1) {
+            if (Math.abs(video.currentTime * 1000 - hit.sourceTimeMs) > SEEK_SLACK_MS) {
+              video.currentTime = hit.sourceTimeMs / 1000;
             }
+            ctrl.needsSeek = false;
           }
-        } else if (!video.paused) {
-          video.pause();
+
+          if (state.playing) {
+            if (video.paused) video.play().catch(() => undefined);
+            if (!ctrl.needsSeek) {
+              const srcMs = video.currentTime * 1000;
+              if (srcMs >= hit.clip.outMs) {
+                // Ran off the trim window: hop to the next clip (or the end).
+                ctrl.timelineMs = hit.clipStartMs + (hit.clip.outMs - hit.clip.inMs) / hit.clip.speed;
+                ctrl.needsSeek = true;
+              } else {
+                ctrl.timelineMs = hit.clipStartMs + (srcMs - hit.clip.inMs) / hit.clip.speed;
+              }
+            }
+          } else if (!video.paused) {
+            video.pause();
+          }
         }
       } else if (!video.paused) {
         video.pause();
       }
 
-      const boundToHit = hit !== null && !ctrl.needsSeek && video.src === hit.source.url;
+      const boundToHit = hit !== null && hit.source !== null && !ctrl.needsSeek && video.src === hit.source.url;
       const hasFrame = boundToHit && video.readyState >= 2 && video.videoWidth > 0;
       renderFrame(
         ctx,

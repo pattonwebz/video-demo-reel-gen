@@ -61,13 +61,31 @@ export interface SourceClip {
   telemetry?: PointerSample[];
 }
 
+export type TransitionType = 'dip-scale' | 'dip-fade';
+
+export interface ClipTransition {
+  type: TransitionType;
+  /** Total transition duration, split evenly across the boundary. */
+  durationMs: number;
+}
+
+export interface TitleCard {
+  heading: string;
+  sub?: string;
+  durationMs: number;
+}
+
 export interface TimelineClip {
   id: string;
-  sourceId: string;
+  /** null ⇒ title card (see `card`) — no source media. */
+  sourceId: string | null;
   /** Trim window within the source, in source-time ms. */
   inMs: number;
   outMs: number;
   speed: number;
+  card?: TitleCard;
+  /** Dip transition covering the boundary AFTER this clip. */
+  transitionOut?: ClipTransition;
 }
 
 /**

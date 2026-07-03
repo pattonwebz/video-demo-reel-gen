@@ -1,5 +1,14 @@
 import { create } from 'zustand';
-import type { Background, FrameChrome, Project, SourceClip, TimelineClip, ZoomSegment } from '../engine/types';
+import type {
+  Background,
+  ClipTransition,
+  FrameChrome,
+  Project,
+  SourceClip,
+  TimelineClip,
+  TitleCard,
+  ZoomSegment,
+} from '../engine/types';
 import { defaultProject } from '../engine/types';
 import { clipAt } from '../engine/timeline';
 
@@ -49,6 +58,11 @@ interface EditorState {
   /** Split the clip under the given timeline time into two at that point. */
   splitClipAt: (timelineMs: number) => void;
   removeClip: (id: string) => void;
+  /** Appends a 3s title-card clip, selects it, and returns its id. */
+  addTitleCard: () => string;
+  updateCard: (id: string, patch: Partial<TitleCard>) => void;
+  /** Set or clear the dip transition on the boundary after a clip. */
+  setClipTransition: (id: string, transition: ClipTransition | null) => void;
 
   requestSeek: (ms: number) => void;
   clearSeekRequest: () => void;
@@ -144,7 +158,7 @@ export const useEditor = create<EditorState>((set) => ({
         ...s.project,
         timeline: s.project.timeline.map((c) => {
           if (c.id !== id) return c;
-          const source = s.project.sources[c.sourceId];
+          const source = c.sourceId !== null ? s.project.sources[c.sourceId] : null;
           const maxOut = source ? source.durationMs : c.outMs;
           const next = { ...c, ...patch };
           next.speed = Math.min(4, Math.max(0.25, next.speed));
@@ -157,7 +171,7 @@ export const useEditor = create<EditorState>((set) => ({
   splitClipAt: (timelineMs) =>
     set((s) => {
       const hit = clipAt(s.project, timelineMs);
-      if (!hit) return {};
+      if (!hit || hit.clip.sourceId === null) return {}; // title cards don't split
       const { clip, sourceTimeMs } = hit;
       // Refuse splits that would leave a sliver on either side.
       if (sourceTimeMs < clip.inMs + MIN_CLIP_SOURCE_MS || sourceTimeMs > clip.outMs - MIN_CLIP_SOURCE_MS) return {};
@@ -175,6 +189,49 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => ({
       project: { ...s.project, timeline: s.project.timeline.filter((c) => c.id !== id) },
       selectedClipId: s.selectedClipId === id ? null : s.selectedClipId,
+    })),
+  addTitleCard: () => {
+    const id = newId('tl');
+    set((s) => ({
+      project: {
+        ...s.project,
+        timeline: [
+          ...s.project.timeline,
+          {
+            id,
+            sourceId: null,
+            inMs: 0,
+            outMs: 3000,
+            speed: 1,
+            card: { heading: 'Title', durationMs: 3000 },
+          },
+        ],
+      },
+      selectedClipId: id,
+      selectedZoomId: null,
+    }));
+    return id;
+  },
+  updateCard: (id, patch) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        timeline: s.project.timeline.map((c) => {
+          if (c.id !== id || !c.card) return c;
+          const card = { ...c.card, ...patch };
+          card.durationMs = Math.max(500, card.durationMs);
+          return { ...c, card, inMs: 0, outMs: card.durationMs };
+        }),
+      },
+    })),
+  setClipTransition: (id, transition) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        timeline: s.project.timeline.map((c) =>
+          c.id === id ? { ...c, transitionOut: transition ?? undefined } : c,
+        ),
+      },
     })),
 
   requestSeek: (ms) => set({ seekRequest: { ms } }),
