@@ -183,6 +183,9 @@ export default function TimelinePanel() {
     reorderClip,
     updateClip,
     removeClip,
+    addTitleCard,
+    updateCard,
+    setClipTransition,
   } = useEditor.getState();
   const selectedZoom = project.zooms.find((z) => z.id === selectedZoomId) ?? null;
   const selectedClip = project.timeline.find((c) => c.id === selectedClipId) ?? null;
@@ -339,6 +342,14 @@ export default function TimelinePanel() {
     splitClipAt(t);
   }
 
+  /** Cycles a clip's transitionOut: none -> dip-fade -> dip-scale -> none. */
+  function cycleTransition(clip: TimelineClip) {
+    const t = clip.transitionOut;
+    if (!t) setClipTransition(clip.id, { type: 'dip-fade', durationMs: 400 });
+    else if (t.type === 'dip-fade') setClipTransition(clip.id, { type: 'dip-scale', durationMs: 400 });
+    else setClipTransition(clip.id, null);
+  }
+
   // --- Clip track: positions, drag-to-reorder, edge trim ---
 
   let clipCursor = 0;
@@ -466,6 +477,13 @@ export default function TimelinePanel() {
         <button className="btn tp-add-btn" title="Add a zoom segment at the playhead" onClick={addZoomAtPlayhead}>
           + Zoom
         </button>
+        <button
+          className="btn tp-add-btn tp-add-title-btn"
+          title="Add a title card at the end of the timeline"
+          onClick={() => addTitleCard()}
+        >
+          + Title
+        </button>
         <button className="btn tp-split-btn" title="Split the clip under the playhead (S)" onClick={splitAtPlayhead}>
           Split
         </button>
@@ -488,6 +506,7 @@ export default function TimelinePanel() {
           {clipPositions.map(({ clip, startMs, durMs }) => {
             const left = (startMs / totalMs) * 100;
             const width = (durMs / totalMs) * 100;
+            const isCard = clip.sourceId === null;
             const label =
               clip.sourceId === null
                 ? `T · ${clip.card?.heading ?? 'Title'}`
@@ -495,32 +514,56 @@ export default function TimelinePanel() {
             return (
               <div
                 key={clip.id}
-                className={`tp-clip-block${clip.id === selectedClipId ? ' selected' : ''}`}
+                className={`tp-clip-block${isCard ? ' tp-clip-card' : ''}${clip.id === selectedClipId ? ' selected' : ''}`}
                 style={{ left: `${left}%`, width: `${width}%` }}
                 onPointerDown={(e) => startClipDrag(e, clip, 'move')}
                 onPointerMove={handleClipPointerMove}
                 onPointerUp={handleClipPointerUp}
                 onPointerCancel={handleClipPointerUp}
               >
-                <div
-                  className="tp-clip-handle tp-clip-handle-left"
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    startClipDrag(e, clip, 'left');
-                  }}
-                />
+                {!isCard && (
+                  <div
+                    className="tp-clip-handle tp-clip-handle-left"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      startClipDrag(e, clip, 'left');
+                    }}
+                  />
+                )}
                 <span className="tp-clip-label">
                   {label}
                   {clip.speed !== 1 && <span className="tp-clip-speed-badge">{clip.speed}×</span>}
                 </span>
-                <div
-                  className="tp-clip-handle tp-clip-handle-right"
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    startClipDrag(e, clip, 'right');
-                  }}
-                />
+                {!isCard && (
+                  <div
+                    className="tp-clip-handle tp-clip-handle-right"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      startClipDrag(e, clip, 'right');
+                    }}
+                  />
+                )}
               </div>
+            );
+          })}
+          {clipPositions.slice(0, -1).map(({ clip }, i) => {
+            const atMs = clipPositions[i + 1].startMs;
+            const t = clip.transitionOut;
+            const stateClass = t ? (t.type === 'dip-fade' ? ' fade' : ' scale') : '';
+            const stateLabel = t ? (t.type === 'dip-fade' ? 'fade' : 'scale') : 'none';
+            return (
+              <button
+                key={`junction_${clip.id}`}
+                type="button"
+                className={`tp-transition-junction${stateClass}`}
+                style={{ left: `${(atMs / totalMs) * 100}%` }}
+                title={`Transition: ${stateLabel} (click to change)`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  cycleTransition(clip);
+                }}
+              />
             );
           })}
         </div>
@@ -588,7 +631,45 @@ export default function TimelinePanel() {
         />
       </div>
       <aside className="tp-inspector">
-        {selectedClip ? (
+        {selectedClip && selectedClip.sourceId === null && selectedClip.card ? (
+          <>
+            <input
+              type="text"
+              className="text-input tp-card-input"
+              placeholder="Heading"
+              value={selectedClip.card.heading}
+              onChange={(e) => updateCard(selectedClip.id, { heading: e.target.value })}
+            />
+            <input
+              type="text"
+              className="text-input tp-card-input"
+              placeholder="Subtitle (optional)"
+              value={selectedClip.card.sub ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                updateCard(selectedClip.id, { sub: v === '' ? undefined : v });
+              }}
+            />
+            <label className="slider-label tp-card-duration">
+              Duration {(selectedClip.card.durationMs / 1000).toFixed(1)}s
+              <input
+                type="range"
+                min={500}
+                max={10000}
+                step={500}
+                value={selectedClip.card.durationMs}
+                onChange={(e) => updateCard(selectedClip.id, { durationMs: Number(e.target.value) })}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn tp-delete-btn"
+              onClick={() => removeClip(selectedClip.id)}
+            >
+              Delete
+            </button>
+          </>
+        ) : selectedClip ? (
           <>
             <div className="tp-speed-group">
               <span className="tp-speed-group-label">Speed</span>
