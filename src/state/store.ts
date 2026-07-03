@@ -25,6 +25,7 @@ interface EditorState {
   setPadding: (padding: number) => void;
   setCornerRadius: (r: number) => void;
   setShadowOpacity: (opacity: number) => void;
+  setDefaultDriftPct: (pct: number) => void;
   addSource: (clip: SourceClip) => void;
   setCurrentTime: (ms: number) => void;
   setPlaying: (playing: boolean) => void;
@@ -60,6 +61,8 @@ export const useEditor = create<EditorState>((set) => ({
         canvas: { ...s.project.canvas, shadow: { ...s.project.canvas.shadow, opacity } },
       },
     })),
+  setDefaultDriftPct: (defaultDriftPct) =>
+    set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, defaultDriftPct } } })),
   addSource: (clip) =>
     set((s) => ({
       project: {
@@ -77,7 +80,13 @@ export const useEditor = create<EditorState>((set) => ({
   addZoom: (seg) => {
     const id = newId('zoom');
     set((s) => ({
-      project: { ...s.project, zooms: [...s.project.zooms, { ...seg, id }] },
+      project: {
+        ...s.project,
+        zooms: [
+          ...s.project.zooms,
+          { driftPct: s.project.canvas.defaultDriftPct, ...seg, id },
+        ],
+      },
       selectedZoomId: id,
     }));
     return id;

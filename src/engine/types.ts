@@ -22,6 +22,8 @@ export interface CanvasSettings {
   /** Corner radius of the video frame in output pixels. */
   cornerRadius: number;
   shadow: FrameShadow;
+  /** driftPct given to newly created zoom segments (0 disables). */
+  defaultDriftPct: number;
 }
 
 export interface PointerSample {
@@ -69,6 +71,8 @@ export interface ZoomSegment {
   cx: number;
   cy: number;
   zoom: number;
+  /** Extra zoom applied linearly across the hold (Ken Burns drift), 0–0.08. */
+  driftPct?: number;
 }
 
 export interface Project {
@@ -108,6 +112,7 @@ export function defaultProject(): Project {
       padding: 0.06,
       cornerRadius: 16,
       shadow: { blur: 60, offsetY: 24, opacity: 0.45 },
+      defaultDriftPct: 0,
     },
     sources: {},
     timeline: [],
