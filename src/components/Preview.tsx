@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { renderFrame } from '../engine/compositor';
 import { clipAt, timelineDurationMs } from '../engine/timeline';
-import { importVideoFile, useEditor } from '../state/store';
+import { useEditor } from '../state/store';
+import { importAndPersistVideoFile } from '../state/persist';
 import ZoomOverlay from './ZoomOverlay';
 
 /** Ignore drift below this when deciding whether to re-seek the video element. */
@@ -155,7 +156,7 @@ export default function Preview() {
         e.preventDefault();
         setDragOver(false);
         for (const file of Array.from(e.dataTransfer.files ?? [])) {
-          if (file.type.startsWith('video/')) await importVideoFile(file);
+          if (file.type.startsWith('video/')) await importAndPersistVideoFile(file);
         }
       }}
     >

@@ -39,6 +39,27 @@ export interface CanvasSettings {
   chrome: FrameChrome;
   /** Edge-darkening opacity while zoomed (0–0.4, 0 disables). */
   zoomVignette: number;
+  /** Draw expanding rings at telemetry click positions. */
+  clickRipples: boolean;
+  /** Draw a smoothed synthetic cursor from pointer telemetry. */
+  syntheticCursor: boolean;
+}
+
+export interface CaptionSegment {
+  id: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+export interface MusicTrack {
+  /** Key into mediaBlobs (and OPFS) for the audio file. */
+  blobId: string;
+  name: string;
+  /** Linear gain 0–1. */
+  gain: number;
+  fadeInMs: number;
+  fadeOutMs: number;
 }
 
 export interface PointerSample {
@@ -113,6 +134,8 @@ export interface Project {
   sources: Record<string, SourceClip>;
   timeline: TimelineClip[];
   zooms: ZoomSegment[];
+  captions: CaptionSegment[];
+  music?: MusicTrack;
 }
 
 export interface AspectPreset {
@@ -148,9 +171,12 @@ export function defaultProject(): Project {
       defaultDriftPct: 0,
       chrome: { style: 'none' },
       zoomVignette: 0,
+      clickRipples: true,
+      syntheticCursor: false,
     },
     sources: {},
     timeline: [],
     zooms: [],
+    captions: [],
   };
 }

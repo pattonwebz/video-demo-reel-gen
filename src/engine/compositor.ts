@@ -1,4 +1,4 @@
-import type { Background, FrameChrome, Project, TitleCard } from './types';
+import type { Background, FrameChrome, PointerSample, Project, TitleCard } from './types';
 import { backgroundImages } from './assets';
 import { cameraAt, poseToSourceCrop } from './camera';
 import { clipAt, clipDurationMs, transitionAt } from './timeline';
@@ -64,9 +64,13 @@ export function renderFrame(ctx: Ctx2D, project: Project, timeMs: number, frame:
       H,
       project.canvas.background,
     );
+    paintCaptions(ctx, project, timeMs);
     return;
   }
-  if (!frame) return;
+  if (!frame) {
+    paintCaptions(ctx, project, timeMs);
+    return;
+  }
 
   // Dip transitions fade (and optionally shrink) the card into the
   // background around a clip boundary; at the cut itself it is invisible,
@@ -111,10 +115,140 @@ export function renderFrame(ctx: Ctx2D, project: Project, timeMs: number, frame:
   ctx.clip();
   paintChromeBar(ctx, chrome, frameRect, s);
   ctx.drawImage(frame.image, crop.sx, crop.sy, crop.sw, crop.sh, videoRect.x, videoRect.y, videoRect.w, videoRect.h);
+  const telemetry = hit?.source?.telemetry;
+  if (telemetry && hit) {
+    const map = (pt: { x: number; y: number }) =>
+      telemetryPointToCanvas(pt, crop, videoRect, frame.width, frame.height);
+    if (project.canvas.clickRipples) paintClickRipples(ctx, telemetry, hit.sourceTimeMs, map, s);
+    if (project.canvas.syntheticCursor) paintCursor(ctx, telemetry, hit.sourceTimeMs, map, s);
+  }
   paintPhoneNotch(ctx, chrome, videoRect, s);
   paintVignette(ctx, project.canvas.zoomVignette, pose.zoom, videoRect);
   ctx.restore();
   ctx.restore();
+  paintCaptions(ctx, project, timeMs);
+}
+
+type SourceCrop = { sx: number; sy: number; sw: number; sh: number };
+
+/** Map a normalized capture-surface point through the camera crop onto the video rect. */
+function telemetryPointToCanvas(
+  pt: { x: number; y: number },
+  crop: SourceCrop,
+  videoRect: Rect,
+  srcW: number,
+  srcH: number,
+): { x: number; y: number } | null {
+  const rx = (pt.x * srcW - crop.sx) / crop.sw;
+  const ry = (pt.y * srcH - crop.sy) / crop.sh;
+  if (rx < -0.05 || rx > 1.05 || ry < -0.05 || ry > 1.05) return null;
+  return { x: videoRect.x + rx * videoRect.w, y: videoRect.y + ry * videoRect.h };
+}
+
+const RIPPLE_MS = 500;
+
+type TelemetryMapper = (pt: { x: number; y: number }) => { x: number; y: number } | null;
+
+function paintClickRipples(
+  ctx: Ctx2D,
+  telemetry: PointerSample[],
+  sourceTimeMs: number,
+  map: TelemetryMapper,
+  s: number,
+): void {
+  for (const sample of telemetry) {
+    if (sample.kind !== 'click') continue;
+    const age = sourceTimeMs - sample.t;
+    if (age < 0 || age > RIPPLE_MS) continue;
+    const mapped = map(sample);
+    if (!mapped) continue;
+    const u = age / RIPPLE_MS;
+    ctx.beginPath();
+    ctx.arc(mapped.x, mapped.y, (10 + 42 * cubicInOut(u)) * s, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${0.65 * (1 - u)})`;
+    ctx.lineWidth = 3 * s;
+    ctx.stroke();
+  }
+}
+
+/** Window over which the synthetic cursor position is smoothed. */
+const CURSOR_SMOOTH_MS = 250;
+
+/**
+ * Time-weighted average of pointer samples in the trailing window — a cheap,
+ * deterministic smoothing that kills hand jitter without visible lag.
+ */
+function smoothedPointerAt(telemetry: PointerSample[], sourceTimeMs: number): { x: number; y: number } | null {
+  let wsum = 0;
+  let x = 0;
+  let y = 0;
+  let last: PointerSample | null = null;
+  for (const sample of telemetry) {
+    if (sample.t > sourceTimeMs) break;
+    last = sample;
+    const age = sourceTimeMs - sample.t;
+    if (age > CURSOR_SMOOTH_MS) continue;
+    const w = 1 - age / CURSOR_SMOOTH_MS;
+    wsum += w;
+    x += sample.x * w;
+    y += sample.y * w;
+  }
+  if (wsum > 0) return { x: x / wsum, y: y / wsum };
+  return last; // pointer idle: park at the last known position
+}
+
+function paintCursor(
+  ctx: Ctx2D,
+  telemetry: PointerSample[],
+  sourceTimeMs: number,
+  map: TelemetryMapper,
+  s: number,
+): void {
+  const pos = smoothedPointerAt(telemetry, sourceTimeMs);
+  if (!pos) return;
+  const mapped = map(pos);
+  if (!mapped) return;
+  ctx.beginPath();
+  ctx.arc(mapped.x, mapped.y, 9 * s, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fill();
+  ctx.lineWidth = 2 * s;
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.stroke();
+}
+
+const CAPTION_FADE_MS = 150;
+
+/** Lower-third caption pill, over everything (video, cards, dips). */
+function paintCaptions(ctx: Ctx2D, project: Project, timeMs: number): void {
+  const { width: W, height: H } = project.canvas;
+  for (const cap of project.captions) {
+    if (timeMs < cap.startMs || timeMs > cap.endMs || !cap.text) continue;
+    const edge = Math.min(timeMs - cap.startMs, cap.endMs - timeMs);
+    const alpha = clamp(edge / CAPTION_FADE_MS, 0, 1);
+    const fontPx = Math.round(H * 0.032);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `500 ${fontPx}px ${CARD_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const padX = fontPx * 0.9;
+    const textW = ctx.measureText(cap.text).width;
+    const pillW = Math.min(textW + padX * 2, W * 0.9);
+    const pillH = fontPx * 1.9;
+    const cx = W / 2;
+    const cy = H - pillH / 2 - H * 0.05;
+    roundedRectPath(ctx, cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2);
+    ctx.fillStyle = 'rgba(10,12,16,0.65)';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.save();
+    roundedRectPath(ctx, cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2);
+    ctx.clip();
+    ctx.fillText(cap.text, cx, cy + 1 * (H / 1080));
+    ctx.restore();
+    ctx.restore();
+  }
 }
 
 function scaleRectAbout(r: Rect, scale: number, cx: number, cy: number): Rect {

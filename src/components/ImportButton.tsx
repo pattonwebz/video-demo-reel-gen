@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { importVideoFile } from '../state/store';
+import { importAndPersistVideoFile } from '../state/persist';
 
 export default function ImportButton() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -15,7 +15,7 @@ export default function ImportButton() {
         hidden
         onChange={async (e) => {
           const file = e.target.files?.[0];
-          if (file) await importVideoFile(file);
+          if (file) await importAndPersistVideoFile(file);
           e.target.value = '';
         }}
       />

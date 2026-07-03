@@ -89,9 +89,11 @@ export async function exportProject(
   const videoSource = new CanvasSource(canvas, { codec: 'avc', bitrate: videoBitrate });
   output.addVideoTrack(videoSource, { frameRate: fps });
 
-  const audio =
-    (await prepareAudioPassthrough(project, inputs, output)) ??
-    (await prepareAudioMix(project, blobs, output));
+  // Music always goes through the mix path — passthrough can't blend it.
+  const audio = project.music
+    ? await prepareAudioMix(project, blobs, output)
+    : ((await prepareAudioPassthrough(project, inputs, output)) ??
+      (await prepareAudioMix(project, blobs, output)));
 
   await output.start();
 
@@ -206,7 +208,16 @@ async function prepareAudioMix(
   output: Output,
 ): Promise<{ pump: (endS: number) => Promise<void> } | null> {
   const contributors = project.timeline.filter((c) => c.sourceId !== null && c.speed === 1);
-  if (contributors.length === 0) return null;
+  if (contributors.length === 0 && !project.music) return null;
+
+  const decodeBlob = async (blob: Blob): Promise<AudioBuffer | null> => {
+    try {
+      const decodeCtx = new OfflineAudioContext(2, 1, MIX_SAMPLE_RATE);
+      return await decodeCtx.decodeAudioData(await blob.arrayBuffer());
+    } catch {
+      return null; // no audio track, or undecodable — contributes silence
+    }
+  };
 
   const decoded = new Map<string, AudioBuffer>();
   for (const clip of contributors) {
@@ -214,14 +225,13 @@ async function prepareAudioMix(
     if (decoded.has(sourceId)) continue;
     const blob = blobs.get(sourceId);
     if (!blob) continue;
-    try {
-      const decodeCtx = new OfflineAudioContext(2, 1, MIX_SAMPLE_RATE);
-      decoded.set(sourceId, await decodeCtx.decodeAudioData(await blob.arrayBuffer()));
-    } catch {
-      // Source has no audio track (or an undecodable one) — contributes silence.
-    }
+    const buffer = await decodeBlob(blob);
+    if (buffer) decoded.set(sourceId, buffer);
   }
-  if (decoded.size === 0) return null;
+
+  const musicBlob = project.music ? blobs.get(project.music.blobId) : undefined;
+  const musicBuffer = musicBlob ? await decodeBlob(musicBlob) : null;
+  if (decoded.size === 0 && !musicBuffer) return null;
 
   const totalS = timelineDurationMs(project) / 1000;
   const mixCtx = new OfflineAudioContext(2, Math.ceil(totalS * MIX_SAMPLE_RATE), MIX_SAMPLE_RATE);
@@ -236,6 +246,24 @@ async function prepareAudioMix(
       node.start(cursorS, clip.inMs / 1000, durS);
     }
     cursorS += durS;
+  }
+  if (musicBuffer && project.music) {
+    const music = project.music;
+    const node = mixCtx.createBufferSource();
+    node.buffer = musicBuffer;
+    node.loop = true; // fill the whole timeline even from a short track
+    const gain = mixCtx.createGain();
+    const fadeInS = Math.min(music.fadeInMs / 1000, totalS / 2);
+    const fadeOutS = Math.min(music.fadeOutMs / 1000, totalS / 2);
+    gain.gain.setValueAtTime(fadeInS > 0 ? 0 : music.gain, 0);
+    if (fadeInS > 0) gain.gain.linearRampToValueAtTime(music.gain, fadeInS);
+    if (fadeOutS > 0) {
+      gain.gain.setValueAtTime(music.gain, totalS - fadeOutS);
+      gain.gain.linearRampToValueAtTime(0, totalS);
+    }
+    node.connect(gain).connect(mixCtx.destination);
+    node.start(0);
+    node.stop(totalS);
   }
   const rendered = await mixCtx.startRendering();
 

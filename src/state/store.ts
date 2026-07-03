@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import type {
   Background,
+  CaptionSegment,
   ClipTransition,
   FrameChrome,
+  MusicTrack,
+  PointerSample,
   Project,
   SourceClip,
   TimelineClip,
@@ -11,6 +14,7 @@ import type {
 } from '../engine/types';
 import { defaultProject } from '../engine/types';
 import { clipAt } from '../engine/timeline';
+import { suggestZoomsFromClicks } from '../autozoom/autozoom';
 
 let idCounter = 0;
 export function newId(prefix: string): string {
@@ -19,6 +23,10 @@ export function newId(prefix: string): string {
 
 interface EditorState {
   project: Project;
+  /** Persistence identity of the open project (OPFS key + display name). */
+  projectId: string;
+  projectName: string;
+  setProjectMeta: (meta: { id?: string; name?: string }) => void;
   /** Transient playback position on the timeline (not persisted). */
   currentTimeMs: number;
   playing: boolean;
@@ -64,6 +72,21 @@ interface EditorState {
   /** Set or clear the dip transition on the boundary after a clip. */
   setClipTransition: (id: string, transition: ClipTransition | null) => void;
 
+  /** Generate zoom suggestions from a clip's click telemetry; returns how many were added. */
+  autoZoomClip: (clipId: string) => number;
+
+  addCaption: (seg: Omit<CaptionSegment, 'id'>) => string;
+  updateCaption: (id: string, patch: Partial<Omit<CaptionSegment, 'id'>>) => void;
+  removeCaption: (id: string) => void;
+  selectedCaptionId: string | null;
+  setSelectedCaption: (id: string | null) => void;
+
+  setMusic: (music: MusicTrack | null) => void;
+  setClickRipples: (on: boolean) => void;
+  setSyntheticCursor: (on: boolean) => void;
+  /** Replace the whole project (OPFS restore / New project). */
+  replaceProject: (project: Project) => void;
+
   requestSeek: (ms: number) => void;
   clearSeekRequest: () => void;
 }
@@ -71,12 +94,17 @@ interface EditorState {
 /** Minimum clip length in source ms — keeps trims/splits from degenerating. */
 const MIN_CLIP_SOURCE_MS = 100;
 
-export const useEditor = create<EditorState>((set) => ({
+export const useEditor = create<EditorState>((set, get) => ({
   project: defaultProject(),
+  projectId: newId('proj'),
+  projectName: 'Untitled project',
+  setProjectMeta: ({ id, name }) =>
+    set((s) => ({ projectId: id ?? s.projectId, projectName: name ?? s.projectName })),
   currentTimeMs: 0,
   playing: false,
   selectedZoomId: null,
   selectedClipId: null,
+  selectedCaptionId: null,
   seekRequest: null,
 
   setCanvasSize: (width, height) =>
@@ -234,6 +262,73 @@ export const useEditor = create<EditorState>((set) => ({
       },
     })),
 
+  autoZoomClip: (clipId) => {
+    const s = get();
+    const clip = s.project.timeline.find((c) => c.id === clipId);
+    const source = clip?.sourceId ? s.project.sources[clip.sourceId] : null;
+    if (!clip || !source?.telemetry?.length) return 0;
+    let clipStartMs = 0;
+    for (const c of s.project.timeline) {
+      if (c.id === clipId) break;
+      clipStartMs += (c.sourceId === null ? (c.card?.durationMs ?? 0) : c.outMs - c.inMs) / c.speed;
+    }
+    const suggestions = suggestZoomsFromClicks(source.telemetry, clip, clipStartMs)
+      // Skip regions that already have a zoom — don't stomp manual work.
+      .filter((z) => !s.project.zooms.some((ex) => z.startMs < ex.endMs && ex.startMs < z.endMs));
+    if (suggestions.length === 0) return 0;
+    set((st) => ({
+      project: {
+        ...st.project,
+        zooms: [
+          ...st.project.zooms,
+          ...suggestions.map((z) => ({ ...z, driftPct: st.project.canvas.defaultDriftPct, id: newId('zoom') })),
+        ],
+      },
+    }));
+    return suggestions.length;
+  },
+
+  addCaption: (seg) => {
+    const id = newId('cap');
+    set((s) => ({
+      project: { ...s.project, captions: [...s.project.captions, { ...seg, id }] },
+      selectedCaptionId: id,
+      selectedZoomId: null,
+      selectedClipId: null,
+    }));
+    return id;
+  },
+  updateCaption: (id, patch) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        captions: s.project.captions.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      },
+    })),
+  removeCaption: (id) =>
+    set((s) => ({
+      project: { ...s.project, captions: s.project.captions.filter((c) => c.id !== id) },
+      selectedCaptionId: s.selectedCaptionId === id ? null : s.selectedCaptionId,
+    })),
+  setSelectedCaption: (selectedCaptionId) => set({ selectedCaptionId }),
+
+  setMusic: (music) =>
+    set((s) => ({ project: { ...s.project, music: music ?? undefined } })),
+  setClickRipples: (clickRipples) =>
+    set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, clickRipples } } })),
+  setSyntheticCursor: (syntheticCursor) =>
+    set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, syntheticCursor } } })),
+  replaceProject: (project) =>
+    set({
+      project,
+      currentTimeMs: 0,
+      playing: false,
+      selectedZoomId: null,
+      selectedClipId: null,
+      selectedCaptionId: null,
+      seekRequest: { ms: 0 },
+    }),
+
   requestSeek: (ms) => set({ seekRequest: { ms } }),
   clearSeekRequest: () => set({ seekRequest: null }),
 }));
@@ -245,7 +340,7 @@ export const useEditor = create<EditorState>((set) => ({
 export const mediaBlobs = new Map<string, Blob>();
 
 /** Probe a media file for duration/dimensions and register it as a source clip. */
-export async function importVideoFile(file: File): Promise<SourceClip> {
+export async function importVideoFile(file: File, telemetry?: PointerSample[]): Promise<SourceClip> {
   const url = URL.createObjectURL(file);
   const meta = await probeVideo(url);
   const clip: SourceClip = {
@@ -255,6 +350,7 @@ export async function importVideoFile(file: File): Promise<SourceClip> {
     durationMs: meta.durationMs,
     width: meta.width,
     height: meta.height,
+    ...(telemetry && telemetry.length > 0 ? { telemetry } : {}),
   };
   mediaBlobs.set(clip.id, file);
   useEditor.getState().addSource(clip);
