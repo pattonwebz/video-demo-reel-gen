@@ -30,3 +30,12 @@ Running log of build progress, findings, and decisions. Newest entries at the bo
 - Verified: `scripts/verify-export.mjs` (import clip → click Export → capture download → ffprobe): mp4 container, h264 1920×1080, aac audio, duration ≈5s; extracted mid-video frame shows correct composite and exact frame timing (burnt-in timecode matches).
 - Test clips: generate with `ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=5" -f lavfi -i "sine=frequency=440:duration=5" -c:v libx264 -pix_fmt yuv420p -c:a aac out.mp4` (audio needed — verify-export asserts an aac track).
 - Conclusion: WebCodecs/Mediabunny path de-risked; M4 risk retired. Next: M2 (zoom engine UI).
+
+## M2 — Zoom engine UI
+
+- Process note (per William, 2026-07-03): no more headless-Chrome/export test runs from the main session (token cost); William tests in his browser against the dev server. Component chunks delegated to parallel sonnet subagents; main session does store contract, integration glue, review, and tsc/vite build only.
+- Store: `addZoom`/`updateZoom`/`removeZoom` + `selectedZoomId`; `seekRequest`/`requestSeek` one-shot so scrubber/overlay can seek without owning the `<video>` (Preview consumes+clears it).
+- `TimelinePanel.tsx/.css` (subagent): ruler with adaptive mm:ss ticks + drag-to-scrub, playhead, zoom track (blocks drag-to-move, edge-resize with min-duration/ramp clamping), inspector (zoom 1.2–4×, ramp slider, delete), Space=play/pause + Delete=remove-selected keyboard handling.
+- `ZoomOverlay.tsx/.css` (subagent): marquee drag on the preview frame → ZoomSegment at playhead (zoom from marquee size clamped 1.2–4×, center mapped through current camera crop so it's correct mid-zoom; 2s default duration, 500ms ramp); after adding, pauses and seeks to segment midpoint so the pose is visible. Overlay is a pointer-events:none cover with a hitzone sized to the frame rect (ResizeObserver) so playback controls stay clickable.
+- Review fixes on subagent output: side effects (addZoom/seek) were inside a `setDrag` updater — StrictMode double-invokes updaters, would add every zoom twice in dev; moved out. Space keydown also skipped for focused buttons to avoid double-toggle.
+- Build (tsc strict + vite) passes. Human pass pending: William to exercise scrub/drag/resize/marquee in browser.

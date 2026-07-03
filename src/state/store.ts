@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Background, Project, SourceClip } from '../engine/types';
+import type { Background, Project, SourceClip, ZoomSegment } from '../engine/types';
 import { defaultProject } from '../engine/types';
 
 let idCounter = 0;
@@ -12,6 +12,13 @@ interface EditorState {
   /** Transient playback position on the timeline (not persisted). */
   currentTimeMs: number;
   playing: boolean;
+  /** Zoom segment currently under edit (track highlight + inspector). */
+  selectedZoomId: string | null;
+  /**
+   * One-shot seek request. The Preview owns the <video> element, so scrub/seek
+   * consumers write here and Preview applies it to the element and clears it.
+   */
+  seekRequest: { ms: number } | null;
 
   setCanvasSize: (width: number, height: number) => void;
   setBackground: (bg: Background) => void;
@@ -21,12 +28,22 @@ interface EditorState {
   addSource: (clip: SourceClip) => void;
   setCurrentTime: (ms: number) => void;
   setPlaying: (playing: boolean) => void;
+
+  /** Adds the segment, selects it, and returns its new id. */
+  addZoom: (seg: Omit<ZoomSegment, 'id'>) => string;
+  updateZoom: (id: string, patch: Partial<Omit<ZoomSegment, 'id'>>) => void;
+  removeZoom: (id: string) => void;
+  setSelectedZoom: (id: string | null) => void;
+  requestSeek: (ms: number) => void;
+  clearSeekRequest: () => void;
 }
 
 export const useEditor = create<EditorState>((set) => ({
   project: defaultProject(),
   currentTimeMs: 0,
   playing: false,
+  selectedZoomId: null,
+  seekRequest: null,
 
   setCanvasSize: (width, height) =>
     set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, width, height } } })),
@@ -56,6 +73,30 @@ export const useEditor = create<EditorState>((set) => ({
     })),
   setCurrentTime: (currentTimeMs) => set({ currentTimeMs }),
   setPlaying: (playing) => set({ playing }),
+
+  addZoom: (seg) => {
+    const id = newId('zoom');
+    set((s) => ({
+      project: { ...s.project, zooms: [...s.project.zooms, { ...seg, id }] },
+      selectedZoomId: id,
+    }));
+    return id;
+  },
+  updateZoom: (id, patch) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        zooms: s.project.zooms.map((z) => (z.id === id ? { ...z, ...patch } : z)),
+      },
+    })),
+  removeZoom: (id) =>
+    set((s) => ({
+      project: { ...s.project, zooms: s.project.zooms.filter((z) => z.id !== id) },
+      selectedZoomId: s.selectedZoomId === id ? null : s.selectedZoomId,
+    })),
+  setSelectedZoom: (selectedZoomId) => set({ selectedZoomId }),
+  requestSeek: (ms) => set({ seekRequest: { ms } }),
+  clearSeekRequest: () => set({ seekRequest: null }),
 }));
 
 /**

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { renderFrame } from '../engine/compositor';
 import { importVideoFile, useEditor } from '../state/store';
+import ZoomOverlay from './ZoomOverlay';
 
 /**
  * Live preview: a hidden <video> is the frame source; a rAF loop runs the
@@ -36,6 +37,15 @@ export default function Preview() {
     if (playing) void video.play();
     else video.pause();
   }, [playing, source]);
+
+  // Apply seek requests (scrubber, zoom placement) to the video element.
+  const seekRequest = useEditor((s) => s.seekRequest);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || seekRequest == null) return;
+    video.currentTime = seekRequest.ms / 1000;
+    useEditor.getState().clearSeekRequest();
+  }, [seekRequest]);
 
   // Render loop. Reads the latest project from the store each frame so the
   // effect never needs to re-subscribe on project edits.
@@ -83,6 +93,7 @@ export default function Preview() {
     >
       <canvas ref={canvasRef} className="preview-canvas" data-testid="preview-canvas" />
       <video ref={videoRef} hidden playsInline />
+      <ZoomOverlay canvasRef={canvasRef} />
       {!source && (
         <div className="drop-hint">
           <p>Drop an MP4 or WebM here</p>

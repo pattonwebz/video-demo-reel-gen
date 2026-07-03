@@ -2,6 +2,7 @@ import Preview from './components/Preview';
 import SettingsPanel from './components/SettingsPanel';
 import ImportButton from './components/ImportButton';
 import ExportButton from './components/ExportButton';
+import TimelinePanel from './components/TimelinePanel';
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
         <Preview />
         <SettingsPanel />
       </main>
+      <TimelinePanel />
     </div>
   );
 }

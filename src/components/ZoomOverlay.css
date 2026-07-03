@@ -1,0 +1,23 @@
+/* Wrapper spans the whole preview area but is click-through by default so the
+   playback controls underneath stay interactive; only the hit zone (sized to
+   the visible video frame) captures pointer events. */
+.zo-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.zo-hitzone {
+  position: absolute;
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.zo-marquee {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(108, 140, 255, 0.18);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}

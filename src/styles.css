@@ -95,6 +95,7 @@ body {
 
 .preview-controls {
   position: absolute;
+  z-index: 2; /* above the ZoomOverlay marquee layer */
   bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
