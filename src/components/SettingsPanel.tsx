@@ -50,7 +50,9 @@ export default function SettingsPanel() {
                   background:
                     p.bg.type === 'solid'
                       ? p.bg.color
-                      : `linear-gradient(${p.bg.angle}deg, ${p.bg.from}, ${p.bg.to})`,
+                      : p.bg.type === 'gradient'
+                        ? `linear-gradient(${p.bg.angle}deg, ${p.bg.from}, ${p.bg.to})`
+                        : undefined,
                 }}
                 onClick={() => setBackground(p.bg)}
               />

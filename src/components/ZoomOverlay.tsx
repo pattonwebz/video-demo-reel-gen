@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react';
 import { useEditor } from '../state/store';
-import { contentRect } from '../engine/compositor';
+import { frameLayout } from '../engine/compositor';
 import { cameraAt, poseToSourceCrop } from '../engine/camera';
 import { clipAt, timelineDurationMs } from '../engine/timeline';
 import { clamp } from '../engine/easing';
@@ -49,7 +49,8 @@ interface EditDrag {
 interface FrameGeometry {
   canvas: HTMLCanvasElement;
   canvasRect: DOMRect;
-  /** Frame rect in canvas-internal pixels (matches the compositor's contentRect). */
+  /** Video rect in canvas-internal pixels (the compositor's frameLayout().videoRect —
+   * excludes window-chrome bars/bezels, so marquee coords map straight to source space). */
   frameRect: { x: number; y: number; w: number; h: number };
   /** Current camera crop, in source pixels. */
   crop: { sx: number; sy: number; sw: number; sh: number };
@@ -74,7 +75,7 @@ function computeGeometry(
   source: SourceClip,
 ): FrameGeometry {
   const canvasRect = canvas.getBoundingClientRect();
-  const frameRect = contentRect(project, source.width, source.height);
+  const frameRect = frameLayout(project, source.width, source.height).videoRect;
   const pose = cameraAt(project.zooms, currentTimeMs);
   const crop = poseToSourceCrop(pose, source.width, source.height);
   return { canvas, canvasRect, frameRect, crop, srcW: source.width, srcH: source.height };
@@ -140,7 +141,7 @@ export default function ZoomOverlay({ canvasRef }: ZoomOverlayProps) {
       const canvasRect = canvas.getBoundingClientRect();
       const rootRect = root.getBoundingClientRect();
       if (canvasRect.width === 0 || canvasRect.height === 0 || canvas.width === 0 || canvas.height === 0) return;
-      const rect = contentRect(project, source.width, source.height);
+      const rect = frameLayout(project, source.width, source.height).videoRect;
       const scaleX = canvasRect.width / canvas.width;
       const scaleY = canvasRect.height / canvas.height;
       setFrameBox({

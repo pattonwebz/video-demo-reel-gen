@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Background, Project, SourceClip, ZoomSegment } from '../engine/types';
+import type { Background, FrameChrome, Project, SourceClip, ZoomSegment } from '../engine/types';
 import { defaultProject } from '../engine/types';
 
 let idCounter = 0;
@@ -26,6 +26,8 @@ interface EditorState {
   setCornerRadius: (r: number) => void;
   setShadowOpacity: (opacity: number) => void;
   setDefaultDriftPct: (pct: number) => void;
+  setChrome: (chrome: FrameChrome) => void;
+  setZoomVignette: (v: number) => void;
   addSource: (clip: SourceClip) => void;
   setCurrentTime: (ms: number) => void;
   setPlaying: (playing: boolean) => void;
@@ -63,6 +65,10 @@ export const useEditor = create<EditorState>((set) => ({
     })),
   setDefaultDriftPct: (defaultDriftPct) =>
     set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, defaultDriftPct } } })),
+  setChrome: (chrome) =>
+    set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, chrome } } })),
+  setZoomVignette: (zoomVignette) =>
+    set((s) => ({ project: { ...s.project, canvas: { ...s.project.canvas, zoomVignette } } })),
   addSource: (clip) =>
     set((s) => ({
       project: {

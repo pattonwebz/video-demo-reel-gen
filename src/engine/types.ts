@@ -5,7 +5,19 @@
 
 export type Background =
   | { type: 'gradient'; from: string; to: string; angle: number }
-  | { type: 'solid'; color: string };
+  | { type: 'solid'; color: string }
+  /** Current video frame, scaled to cover and blurred. blurPx 20–120, brightness 0.4–1. */
+  | { type: 'frame-blur'; blurPx: number; brightness: number }
+  /** Bitmap looked up in the `backgroundImages` registry (see engine/assets.ts). */
+  | { type: 'image'; imageId: string };
+
+export type ChromeStyle = 'none' | 'mac' | 'browser' | 'phone';
+
+export interface FrameChrome {
+  style: ChromeStyle;
+  /** Text shown in the browser chrome's URL pill; hidden when empty. */
+  urlText?: string;
+}
 
 export interface FrameShadow {
   blur: number;
@@ -24,6 +36,9 @@ export interface CanvasSettings {
   shadow: FrameShadow;
   /** driftPct given to newly created zoom segments (0 disables). */
   defaultDriftPct: number;
+  chrome: FrameChrome;
+  /** Edge-darkening opacity while zoomed (0–0.4, 0 disables). */
+  zoomVignette: number;
 }
 
 export interface PointerSample {
@@ -113,6 +128,8 @@ export function defaultProject(): Project {
       cornerRadius: 16,
       shadow: { blur: 60, offsetY: 24, opacity: 0.45 },
       defaultDriftPct: 0,
+      chrome: { style: 'none' },
+      zoomVignette: 0,
     },
     sources: {},
     timeline: [],
