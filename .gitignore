@@ -4,3 +4,16 @@ dist/
 .DS_Store
 test-output/
 .idea/
+
+# Internal development notes
+PROGRESS.md
+*.claide.md
+
+# Dependencies
+package-lock.json
+yarn.lock
+
+# Build/dev
+.vite/
+*.log
+
