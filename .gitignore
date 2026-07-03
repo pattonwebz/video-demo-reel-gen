@@ -5,8 +5,7 @@ dist/
 test-output/
 .idea/
 # Internal development & planning notes (kept locally only)
-PROGRESS.md
-PLAN.md
+docs-local/
 *.claude.md
 *.claide.md
 
