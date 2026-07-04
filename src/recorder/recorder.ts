@@ -21,6 +21,9 @@ export class DemoRecorder {
   private streams: MediaStream[] = [];
   private audioCtx: AudioContext | null = null;
   private telemetry = new TelemetryReceiver();
+  private flushed: Promise<void> | null = null;
+  /** Fired when the browser's own stop-share UI ends the capture; call stop() to collect. */
+  onautostop: (() => void) | null = null;
 
   get recording(): boolean {
     return this.recorder !== null && this.recorder.state === 'recording';
@@ -60,24 +63,31 @@ export class DemoRecorder {
     this.recorder.ondataavailable = (e) => {
       if (e.data.size > 0) this.chunks.push(e.data);
     };
+    // Attach onstop before start so a browser-initiated stop (stop-share UI)
+    // still resolves a later stop() call instead of hanging it.
+    const recorder = this.recorder;
+    this.flushed = new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+    });
     this.telemetry.begin(Date.now());
     this.recorder.start(1000);
 
     // Ending the share via the browser's own UI should finish the recording.
     display.getVideoTracks()[0]?.addEventListener('ended', () => {
-      if (this.recording) this.recorder?.stop();
+      if (this.recording) {
+        this.recorder?.stop();
+        this.onautostop?.();
+      }
     });
   }
 
   /** Resolves with the recorded file once the recorder has flushed. */
   async stop(): Promise<RecordingResult> {
     const recorder = this.recorder;
-    if (!recorder) throw new Error('Not recording');
-    const done = new Promise<void>((resolve) => {
-      recorder.onstop = () => resolve();
-    });
+    if (!recorder || !this.flushed) throw new Error('Not recording');
     if (recorder.state !== 'inactive') recorder.stop();
-    await done;
+    await this.flushed;
+    this.flushed = null;
 
     const telemetry = this.telemetry.end();
     for (const s of this.streams) s.getTracks().forEach((t) => t.stop());
