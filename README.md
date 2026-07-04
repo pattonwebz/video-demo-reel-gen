@@ -1,17 +1,23 @@
 # Demo Reel Studio 🎬
 
-A **browser-based video editor** for creating polished demo reels with camera effects (zoom/pan), click highlights, and styled backgrounds — exports as MP4. Runs **100% client-side** using WebCodecs and Mediabunny.
+A **browser-based video editor** for creating polished demo reels with camera effects (zoom/pan), click highlights, captions, music, and styled backgrounds — exports as MP4 up to 4K. Runs **100% client-side** using WebCodecs and Mediabunny; your media never leaves your machine.
+
+**Live app:** https://pattonwebz.github.io/video-demo-reel-gen/ (Chrome/Edge)
 
 ## Features
 
-- ✅ **Import videos**: Drop an MP4 or WebM file to get started
-- ✅ **Styled canvas preview**: Customize backgrounds, padding, corner radius, shadows, and aspect ratios (16:9, square, vertical)
-- ✅ **Zoom/pan effects**: Add camera keyframes with easing curves; drag-to-define zoom regions on the preview
-- ✅ **Visual timeline editor**: Scrubber, playback controls, editable zoom keyframes
-- 🟡 **Multi-clip timeline**: Reorder, trim, split, and adjust per-clip speed (in progress)
-- 🟡 **MP4 export**: Encode to H.264 with audio (single-clip support live, multi-clip in progress)
-- 🟡 **In-app recording + auto-zoom**: Screen recording with click-telemetry-driven zoom suggestions (planned)
-- 🟡 **Click overlays & captions**: Visual effects and text overlays (planned)
+- ✅ **In-app screen recording**: Capture a tab/window/screen + microphone, with pointer telemetry from a bookmarklet on the demoed page
+- ✅ **Auto-zoom**: Generate zoom segments automatically from recorded click clusters
+- ✅ **Import videos**: Drop MP4 or WebM files (multiple at once)
+- ✅ **Multi-clip timeline**: Reorder, trim, split, and per-clip speed (0.25–4×)
+- ✅ **Zoom/pan effects**: Drag-to-define zoom regions, eased ramps, chained pans (snap two zooms together for a direct A→B pan), Ken Burns drift on holds
+- ✅ **Styled canvas**: Solid/gradient/blur/image backgrounds, padding, corner radius, shadow, macOS/browser/phone window chrome, zoom vignette
+- ✅ **Cuts & titles**: Dip-to-fade/scale transitions between clips, animated title cards
+- ✅ **Click effects**: Click ripples and a smoothed synthetic cursor (driven by recorded telemetry)
+- ✅ **Captions**: Lower-third caption track with its own timeline lane
+- ✅ **Background music**: Import a track with volume and fade in/out (mixed into exports)
+- ✅ **MP4 export**: H.264 + AAC, 1080p or 4K, 30/60 fps, optional motion blur on fast camera moves
+- ✅ **Named projects**: Multiple projects saved locally in the browser (OPFS), auto-saved and restored on reload
 
 ## Stack
 
@@ -44,53 +50,86 @@ npm run preview
 
 ## How to Use
 
-1. **Open the app** and drop an MP4 or WebM video file
-2. **Adjust canvas settings** in the Settings panel (background, aspect ratio, padding, etc.)
-3. **Add zoom effects**:
-   - Click the **+ Zoom** button to add a centered 2× zoom at the current playhead
-   - **Drag a marquee** on the preview to define a custom zoom region
-   - Adjust the zoom level (1.2–4×), duration, and easing in the inspector
-4. **Preview** as you go with the play/pause and timeline scrubber
-5. **Export** as MP4 (File → Export)
+### Record a demo (or import one)
+
+1. Click **Record** in the top bar.
+2. Enter your demo page's URL and click **Open** — it opens as a popup (this link is required for telemetry to reach the recorder).
+3. Click **Copy bookmarklet**, then create a bookmark on your bookmarks bar and paste the copied code as its URL. On the demo page, click that bookmarklet — it streams pointer/click telemetry back to the studio.
+4. Click **Start recording** and pick what to share. **Pick the demo page's tab** (not a window or full screen) for accurate click coordinates.
+5. Do your demo, then stop via the Record button (or the browser's own "Stop sharing"). The recording imports itself into the timeline with its telemetry attached.
+
+No telemetry needed? Just drop MP4/WebM files onto the preview, or use **Import**.
+
+### Edit
+
+- **Clips**: drag blocks on the clip track to reorder; drag edges to trim; **Split** button (or `S`) at the playhead; speed presets and delete in the clip inspector.
+- **Zooms**: click **+ Zoom**, drag a marquee on the preview, or drag on empty zoom-track space. Adjust zoom (1.2–4×), ramp, and hold drift in the inspector; drag the dashed region box on the preview to retarget. Snap two zoom blocks together to chain them into one continuous pan.
+- **Auto-zoom**: select a recorded clip and click **Auto-zoom** in its inspector — click clusters from telemetry become zoom segments (regions you've already zoomed are left alone).
+- **Transitions & titles**: click the diamond between two clips to cycle none → fade → scale; **+ Title** adds an animated title card (edit heading/subheading/duration in its inspector).
+- **Captions**: **+ Caption** adds a lower-third at the playhead; drag to move/resize on the caption track, edit text in the inspector.
+- **Canvas & effects**: Settings panel — background (solid/gradient/blur/image), padding/radius/shadow, window chrome, zoom vignette, click ripples, smoothed cursor.
+- **Music**: Settings panel → **Add music…**, then set volume and fades. *Music (and all audio) plays in exports only — the preview is silent.*
+
+### Projects
+
+The project menu next to the app title lets you rename the current project and create, switch, or delete projects. Everything (including media) is auto-saved to the browser's private storage (OPFS) and restored on reload. Storage is per-site and per-browser-profile — nothing is uploaded.
+
+### Export
+
+Click **Export** and choose resolution (1080p/4K), frame rate (30/60), and optional motion blur (applied to fast camera ramps, export-only). The MP4 (H.264 + AAC) downloads when encoding finishes.
 
 ### Keyboard Shortcuts
+
 - **Space**: Play/pause
-- **Delete**: Remove selected zoom
-- **S**: Split zoom at playhead (coming soon)
-- **Arrow keys**: Nudge playhead (coming soon)
+- **Delete/Backspace**: Remove selected zoom, clip, or caption
+- **S**: Split the clip under the playhead
+- **← / →**: Nudge selected clip trim by 100 ms (Shift: 1 s)
+- **Escape**: Cancel a region-box edit / close popovers
 
-## Project Status & Roadmap
+## Project Status
 
-Currently at **Milestone 2** of 6:
+All planned v1 milestones are complete:
+
 - ✅ **M1**: Skeleton + import + styled preview
 - ✅ **M2**: Zoom engine with visual editor
-- 🟡 **M3**: Multi-clip timeline editor
-- 🟡 **M4**: MP4 export pipeline
-- ⏳ **M5**: In-app recorder + auto-zoom from click telemetry
-- ⏳ **M6**: Polish (captions, background music, smoothed cursor)
+- ✅ **M3**: Multi-clip timeline editor (reorder/trim/split/speed)
+- ✅ **M4**: Full export pipeline (multi-clip audio mix, 4K, 60 fps, motion blur)
+- ✅ **M5**: In-app recorder + telemetry bookmarklet + auto-zoom + click ripples
+- ✅ **M6**: Captions, music, smoothed cursor, named projects with OPFS persistence
+- ✅ **Effects expansion**: chained pans, hold drift, frame-blur/image backgrounds, window chrome, vignette, dip transitions, title cards
 
-See [PLAN.md](./PLAN.md) for the full architecture and design decisions, and [PROGRESS.md](./PROGRESS.md) for detailed development notes.
+Deferred: crossfade transitions (needs dual-clip decode), idle-time speed-up.
 
 ## Architecture
 
 ```
 src/
-├── main.tsx                    # React entry point
+├── main.tsx                    # Entry point (restores last project, starts autosave)
 ├── components/
-│   ├── Preview.tsx             # Video preview + zoom overlay
-│   ├── TimelinePanel.tsx        # Ruler, playhead, zoom track, inspector
-│   ├── SettingsPanel.tsx        # Canvas styling controls
-│   ├── ExportButton.tsx         # MP4 export trigger
-│   └── ImportButton.tsx         # Video file import
+│   ├── Preview.tsx             # Video preview + playback controller
+│   ├── ZoomOverlay.tsx         # Marquee create + region-box editing on the preview
+│   ├── TimelinePanel.tsx       # Ruler, playhead, clip/zoom/caption tracks, inspectors
+│   ├── SettingsPanel.tsx       # Canvas styling, effects toggles, music
+│   ├── RecordPanel.tsx         # Screen recording + telemetry bookmarklet
+│   ├── ProjectMenu.tsx         # Named-project switcher (OPFS)
+│   ├── ExportButton.tsx        # Export settings + MP4 export trigger
+│   └── ImportButton.tsx        # Video file import
 ├── engine/
-│   ├── compositor.ts            # Canvas rendering pipeline
-│   ├── camera.ts                # Zoom/pan transform math
-│   ├── easing.ts                # Cubic/spring easing functions
-│   ├── export.ts                # Mediabunny MP4 export
-│   ├── timeline.ts              # Project timeline algebra
-│   └── types.ts                 # Shared types
+│   ├── compositor.ts           # Canvas rendering pipeline (preview + export)
+│   ├── camera.ts               # Zoom/pan keyframe compiler + transform math
+│   ├── easing.ts               # Easing functions
+│   ├── export.ts               # Mediabunny MP4 export (video + audio mix)
+│   ├── timeline.ts             # Timeline algebra (clips, trims, speeds, transitions)
+│   ├── assets.ts               # Background image registry
+│   └── types.ts                # Shared types
+├── recorder/
+│   ├── recorder.ts             # getDisplayMedia + mic capture, WebAudio mixdown
+│   └── telemetry.ts            # Bookmarklet builder + postMessage receiver
+├── autozoom/
+│   └── autozoom.ts             # Click-cluster → zoom-segment heuristics
 └── state/
-    └── store.ts                 # Zustand editor state
+    ├── store.ts                # Zustand editor state
+    └── persist.ts              # OPFS multi-project save/load/autosave
 ```
 
 ### Key Design Decisions
@@ -98,7 +137,7 @@ src/
 - **Pure compositor**: `(project, timeMs, sourceFrame) → canvas`. Same code path drives preview and export — what you see is what you export.
 - **Client-only**: No server, no authentication, no cloud storage. Your media never leaves your machine.
 - **Mediabunny over Remotion**: Open-source media toolkit with full WebCodecs support; Remotion is cost-prohibitive for teams.
-- **Bookmarklet telemetry**: Auto-zoom requires telemetry from the demoed page (e.g., WordPress admin). A browser bookmarklet posts pointer/click events back to the recorder via `postMessage`.
+- **Bookmarklet telemetry**: Auto-zoom, click ripples, and the synthetic cursor need pointer data from the demoed page (e.g., a WordPress admin). A bookmarklet posts pointer/click events back to the recorder via `postMessage` — which is why the demo page must be opened from the Record panel.
 
 ## Browser Support
 
@@ -108,7 +147,8 @@ src/
 Requirements:
 - WebCodecs API (`VideoEncoder`, `VideoDecoder`)
 - OffscreenCanvas
-- Web Audio API (for audio passthrough)
+- Web Audio API (audio mixdown)
+- Origin Private File System (project persistence)
 
 ## Development
 
@@ -116,28 +156,26 @@ Requirements:
 ```bash
 # Type check and build
 npm run build
-
-# Lint TypeScript
-tsc -b
 ```
 
-Development follows a strict TypeScript setup with incremental builds via `tsc -b`.
+Development follows a strict TypeScript setup with incremental builds via `tsc -b`. Headless verification scripts live in `scripts/` (`verify.mjs`, `verify-m1.mjs`, `verify-export.mjs`) and drive the app in headless Chrome via playwright-core.
 
 ### Project State Model
 
 The editor manages a serializable JSON project document:
-- **Clips**: Source videos with optional in/out trim and playback speed
-- **Timeline**: Ordered list of clips with timing metadata
-- **Zoom keyframes**: Camera transforms (zoom, pan, easing, duration)
-- **Canvas settings**: Aspect ratio, background, padding, shadows
-- **Media blobs**: Raw video/audio bytes (stored separately, outside serializable state)
+- **Sources**: Imported/recorded videos, with optional pointer telemetry
+- **Timeline**: Ordered clips (trim/speed/transition) and title cards
+- **Zooms**: Camera segments (region, zoom, ramp, drift)
+- **Captions & music**: Lower-third segments and a background track
+- **Canvas settings**: Aspect, background, padding, chrome, effect toggles
+- **Media blobs**: Raw bytes kept outside serializable state, mirrored to OPFS
 
 ### Export Pipeline
 
 1. Input video is decoded via Mediabunny `VideoSampleSink`
-2. Each frame is rendered through the compositor on OffscreenCanvas
+2. Each frame is rendered through the compositor on OffscreenCanvas (with optional multi-sample motion blur)
 3. Frames are H.264 encoded via `VideoEncoder`
-4. Audio is passthrough-muxed via Mediabunny `Mp4Output`
+4. Audio: passthrough for the trivial single-clip case; otherwise clips + music are scheduled into an `OfflineAudioContext` mix and AAC-encoded
 5. Final MP4 is written to a Blob and offered as download
 
 **Performance note**: Decoding is batched at the GOP level via `samplesAtTimestamps()` — never call `getSample()` per frame.
@@ -147,9 +185,8 @@ The editor manages a serializable JSON project document:
 - Multi-user / authentication
 - Server rendering
 - Safari / Firefox support guarantees
-- Motion blur
+- Motion blur in the *preview* (export-only)
 - AI-driven narrative editing (possible in v2)
-- Project save/load to persistent storage (OPFS in v2)
 
 ## License
 
@@ -167,12 +204,12 @@ This is an internal tool. External contributions are not currently solicited, bu
 
 ## Known Limitations
 
-- **Recording**: `getDisplayMedia()` cannot capture the cursor or click events automatically; the bookmarklet workaround requires an instrumented demo page.
-- **Export speed**: Single-clip exports are ~10 fps at 1080p; full pipeline (multi-clip, audio re-encode) is being optimized in M4.
-- **Audio**: Currently passthrough only (M4 adds decode/re-encode for trimmed clips and mixing).
-- **Hardware acceleration**: WebCodecs performance varies by device; export may be slower on older hardware.
+- **Silent preview**: Clip audio and music play in exports only; the preview video is muted (autoplay requirement).
+- **Telemetry accuracy**: Click coordinates are exact only when recording the demo page's *tab*; window/screen capture skews them. The demo page must be opened via the Record panel's popup for telemetry to arrive.
+- **Speed-changed clips**: Export as silent (audio is not time-stretched).
+- **Export speed**: Roughly ~10 fps at 1080p on typical hardware; 4K and motion blur are proportionally slower. WebCodecs performance varies by device.
+- **Storage**: Projects live in the browser's OPFS — per-site, per-profile, and cleared if you wipe site data. There's no export/import of project files yet.
 
 ---
 
-**Questions?** Open a [GitHub Issue](https://github.com/your-username/video-demo-reel-gen/issues).
-
+**Questions?** Open a [GitHub Issue](https://github.com/pattonwebz/video-demo-reel-gen/issues).
