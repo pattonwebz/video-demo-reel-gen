@@ -2,7 +2,8 @@ import { useState, type ChangeEvent } from 'react';
 import { ASPECT_PRESETS, BACKGROUND_PRESETS } from '../engine/types';
 import type { ChromeStyle } from '../engine/types';
 import { backgroundImages } from '../engine/assets';
-import { useEditor, newId } from '../state/store';
+import { useEditor, newId, mediaBlobs } from '../state/store';
+import { persistMedia } from '../state/persist';
 
 const CHROME_OPTIONS: { value: ChromeStyle; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -14,6 +15,7 @@ const CHROME_OPTIONS: { value: ChromeStyle; label: string }[] = [
 export default function SettingsPanel() {
   const [collapsed, setCollapsed] = useState(false);
   const canvas = useEditor((s) => s.project.canvas);
+  const music = useEditor((s) => s.project.music);
   const {
     setCanvasSize,
     setBackground,
@@ -23,6 +25,9 @@ export default function SettingsPanel() {
     setChrome,
     setZoomVignette,
     setDefaultDriftPct,
+    setMusic,
+    setClickRipples,
+    setSyntheticCursor,
   } = useEditor.getState();
 
   const bg = canvas.background;
@@ -34,7 +39,18 @@ export default function SettingsPanel() {
     const bitmap = await createImageBitmap(file);
     const id = newId('bgimg');
     backgroundImages.set(id, bitmap);
+    void persistMedia(id, file);
     setBackground({ type: 'image', imageId: id });
+  }
+
+  function handleMusicFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const id = newId('music');
+    mediaBlobs.set(id, file);
+    void persistMedia(id, file);
+    setMusic({ blobId: id, name: file.name, gain: 0.6, fadeInMs: 500, fadeOutMs: 1000 });
   }
 
   return (
@@ -214,6 +230,87 @@ export default function SettingsPanel() {
             />
             Drift during holds <span className="hint">(new zooms)</span>
           </label>
+        </section>
+
+        <section>
+          <h2>Effects</h2>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={canvas.clickRipples}
+              onChange={(e) => setClickRipples(e.target.checked)}
+            />
+            Click ripples
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={canvas.syntheticCursor}
+              onChange={(e) => setSyntheticCursor(e.target.checked)}
+            />
+            Smoothed cursor
+          </label>
+          <p className="hint">Both need pointer telemetry from the recorder bookmarklet.</p>
+        </section>
+
+        <section>
+          <h2>Music</h2>
+          {!music ? (
+            <label className="btn file-picker-btn">
+              Add music…
+              <input
+                type="file"
+                accept="audio/*"
+                className="file-input-hidden"
+                onChange={handleMusicFile}
+              />
+            </label>
+          ) : (
+            <>
+              <div className="music-track-row">
+                <span className="music-track-name" title={music.name}>
+                  {music.name}
+                </span>
+                <button type="button" className="btn btn-subtle" onClick={() => setMusic(null)}>
+                  Remove
+                </button>
+              </div>
+              <label className="slider-label">
+                Volume
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={music.gain}
+                  onChange={(e) => setMusic({ ...music, gain: Number(e.target.value) })}
+                />
+              </label>
+              <label className="slider-label">
+                Fade in
+                <input
+                  type="range"
+                  min={0}
+                  max={5000}
+                  step={100}
+                  value={music.fadeInMs}
+                  onChange={(e) => setMusic({ ...music, fadeInMs: Number(e.target.value) })}
+                />
+              </label>
+              <label className="slider-label">
+                Fade out
+                <input
+                  type="range"
+                  min={0}
+                  max={5000}
+                  step={100}
+                  value={music.fadeOutMs}
+                  onChange={(e) => setMusic({ ...music, fadeOutMs: Number(e.target.value) })}
+                />
+              </label>
+            </>
+          )}
+          <p className="hint">Music plays in exports only (preview is silent).</p>
         </section>
       </div>
     </aside>

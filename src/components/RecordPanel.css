@@ -1,0 +1,145 @@
+.rp-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.rp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.rp-btn-live {
+  background: #b3312c;
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-btn-live:hover {
+  filter: brightness(1.1);
+}
+
+.rp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
+  animation: rp-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes rp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.rp-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rp-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rp-popover-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.rp-popover-close:hover {
+  color: var(--text);
+}
+
+.rp-popover-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-popover-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.rp-url-row {
+  display: flex;
+  gap: 8px;
+}
+
+.rp-url-input {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.rp-open-btn {
+  flex-shrink: 0;
+}
+
+.rp-copy-btn {
+  align-self: flex-start;
+}
+
+.rp-hint {
+  line-height: 1.5;
+}
+
+.rp-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.rp-start-btn {
+  width: 100%;
+}
+
+@media (max-width: 700px) {
+  .rp-popover {
+    width: 280px;
+  }
+
+  .rp-popover-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .rp-open-btn {
+    min-height: 44px;
+  }
+
+  .rp-copy-btn,
+  .rp-start-btn {
+    min-height: 44px;
+  }
+}

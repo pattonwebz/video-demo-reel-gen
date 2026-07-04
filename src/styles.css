@@ -40,6 +40,13 @@ body {
   background: var(--panel);
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .topbar h1 {
   font-size: 15px;
   font-weight: 600;
@@ -273,6 +280,24 @@ body {
   accent-color: var(--accent);
 }
 
+.music-track-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.music-track-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+
 /* Buttons */
 
 .btn {
@@ -289,6 +314,20 @@ body {
 .btn:hover {
   filter: brightness(1.1);
 }
+
+.btn-subtle {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+}
+
+.file-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 .topbar-actions { display: flex; gap: 8px; align-items: center; }
 
 .export-error { color: #ff7b7b; font-size: 12px; max-width: 320px; }

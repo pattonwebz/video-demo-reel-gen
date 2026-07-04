@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEditor } from '../state/store';
 import { clipDurationMs, timelineDurationMs } from '../engine/timeline';
-import type { TimelineClip, ZoomSegment } from '../engine/types';
+import type { CaptionSegment, TimelineClip, ZoomSegment } from '../engine/types';
 import { CHAIN_GAP_MS } from '../engine/camera';
 import './TimelinePanel.css';
 
@@ -36,6 +36,17 @@ interface ClipDragState {
   outMs: number;
   speed: number;
 }
+
+interface CaptionDragState {
+  type: 'move' | 'left' | 'right';
+  id: string;
+  startX: number;
+  startMs: number;
+  endMs: number;
+}
+
+/** Minimum caption duration (ms) enforced while resizing. */
+const CAPTION_MIN_DUR_MS = 300;
 
 const TICK_STEPS_MS = [
   500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000, 900000, 1800000,
@@ -134,16 +145,26 @@ export default function TimelinePanel() {
   const currentTimeMs = useEditor((s) => s.currentTimeMs);
   const selectedZoomId = useEditor((s) => s.selectedZoomId);
   const selectedClipId = useEditor((s) => s.selectedClipId);
+  const selectedCaptionId = useEditor((s) => s.selectedCaptionId);
 
   const stripRef = useRef<HTMLDivElement | null>(null);
   const rulerDragging = useRef(false);
   const dragRef = useRef<DragState | null>(null);
   const clipDragRef = useRef<ClipDragState | null>(null);
+  const captionDragRef = useRef<CaptionDragState | null>(null);
+  const autoZoomFeedbackTimerRef = useRef<number | null>(null);
   const [createDrag, setCreateDrag] = useState<{
     pointerId: number;
     anchorMs: number;
     curMs: number;
   } | null>(null);
+  const [autoZoomFeedback, setAutoZoomFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoZoomFeedbackTimerRef.current) clearTimeout(autoZoomFeedbackTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -152,6 +173,7 @@ export default function TimelinePanel() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (state.selectedZoomId) state.removeZoom(state.selectedZoomId);
         else if (state.selectedClipId) state.removeClip(state.selectedClipId);
+        else if (state.selectedCaptionId) state.removeCaption(state.selectedCaptionId);
       } else if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
         state.setPlaying(!state.playing);
@@ -186,9 +208,15 @@ export default function TimelinePanel() {
     addTitleCard,
     updateCard,
     setClipTransition,
+    updateCaption,
+    removeCaption,
+    setSelectedCaption,
   } = useEditor.getState();
   const selectedZoom = project.zooms.find((z) => z.id === selectedZoomId) ?? null;
   const selectedClip = project.timeline.find((c) => c.id === selectedClipId) ?? null;
+  const selectedCaption = project.captions.find((c) => c.id === selectedCaptionId) ?? null;
+  const selectedClipSource =
+    selectedClip && selectedClip.sourceId ? project.sources[selectedClip.sourceId] : null;
 
   function seekFromClientX(clientX: number) {
     const t = timeFromClientX(clientX);
@@ -224,6 +252,7 @@ export default function TimelinePanel() {
     };
     setSelectedZoom(seg.id);
     setSelectedClip(null);
+    setSelectedCaption(null);
   }
 
   function handleBlockPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
@@ -277,6 +306,7 @@ export default function TimelinePanel() {
     if (e.target !== e.currentTarget) return; // blocks handle their own drags
     setSelectedZoom(null);
     setSelectedClip(null);
+    setSelectedCaption(null);
     const t = timeFromClientX(e.clientX);
     if (t == null) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -335,6 +365,24 @@ export default function TimelinePanel() {
       zoom: 2,
     });
     setPlaying(false);
+    setSelectedCaption(null);
+  }
+
+  function addCaptionAtPlayhead() {
+    const { addCaption, setPlaying, currentTimeMs: t } = useEditor.getState();
+    // Pull back from the timeline end so a playhead parked there (end of
+    // playback) still yields a visible, grabbable caption.
+    const start = clamp(t, 0, Math.max(0, totalMs - 2000));
+    addCaption({ startMs: start, endMs: Math.min(start + 2000, totalMs), text: 'Caption' });
+    setPlaying(false);
+  }
+
+  function handleAutoZoom() {
+    if (!selectedClipId) return;
+    const n = useEditor.getState().autoZoomClip(selectedClipId);
+    setAutoZoomFeedback(n > 0 ? `Added ${n} zoom${n === 1 ? '' : 's'}` : 'No new zooms');
+    if (autoZoomFeedbackTimerRef.current) window.clearTimeout(autoZoomFeedbackTimerRef.current);
+    autoZoomFeedbackTimerRef.current = window.setTimeout(() => setAutoZoomFeedback(null), 2000);
   }
 
   function splitAtPlayhead() {
@@ -394,6 +442,7 @@ export default function TimelinePanel() {
     };
     setSelectedClip(clip.id);
     setSelectedZoom(null);
+    setSelectedCaption(null);
   }
 
   function handleClipPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
@@ -447,6 +496,59 @@ export default function TimelinePanel() {
     setSelectedClip(null);
   }
 
+  // --- Caption track: click to select, drag body/edges to move/resize ---
+
+  function startCaptionDrag(
+    e: ReactPointerEvent<HTMLDivElement>,
+    seg: CaptionSegment,
+    type: CaptionDragState['type'],
+  ) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    captionDragRef.current = {
+      type,
+      id: seg.id,
+      startX: e.clientX,
+      startMs: seg.startMs,
+      endMs: seg.endMs,
+    };
+    setSelectedCaption(seg.id);
+    setSelectedZoom(null);
+    setSelectedClip(null);
+  }
+
+  function handleCaptionPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = captionDragRef.current;
+    if (!drag) return;
+    const rect = stripRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const pxPerMs = rect.width / totalMs;
+    const deltaMs = (e.clientX - drag.startX) / pxPerMs;
+
+    if (drag.type === 'move') {
+      const dur = drag.endMs - drag.startMs;
+      const rawStart = drag.startMs + deltaMs;
+      const newStart = clamp(rawStart, 0, totalMs - dur);
+      updateCaption(drag.id, { startMs: newStart, endMs: newStart + dur });
+    } else if (drag.type === 'left') {
+      const rawStart = drag.startMs + deltaMs;
+      const newStart = clamp(rawStart, 0, drag.endMs - CAPTION_MIN_DUR_MS);
+      updateCaption(drag.id, { startMs: newStart });
+    } else {
+      const rawEnd = drag.endMs + deltaMs;
+      const newEnd = clamp(rawEnd, drag.startMs + CAPTION_MIN_DUR_MS, totalMs);
+      updateCaption(drag.id, { endMs: newEnd });
+    }
+  }
+
+  function handleCaptionPointerUp() {
+    captionDragRef.current = null;
+  }
+
+  function handleCaptionTrackPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return; // caption blocks handle their own drags
+    setSelectedCaption(null);
+  }
+
   const tickInterval = pickTickIntervalMs(totalMs);
   const ticks: number[] = [];
   for (let t = 0; t <= totalMs; t += tickInterval) ticks.push(t);
@@ -480,9 +582,19 @@ export default function TimelinePanel() {
         <button
           className="btn tp-add-btn tp-add-title-btn"
           title="Add a title card at the end of the timeline"
-          onClick={() => addTitleCard()}
+          onClick={() => {
+            addTitleCard();
+            setSelectedCaption(null);
+          }}
         >
           + Title
+        </button>
+        <button
+          className="btn tp-add-btn tp-add-caption-btn"
+          title="Add a caption at the playhead"
+          onClick={addCaptionAtPlayhead}
+        >
+          + Caption
         </button>
         <button className="btn tp-split-btn" title="Split the clip under the playhead (S)" onClick={splitAtPlayhead}>
           Split
@@ -625,6 +737,39 @@ export default function TimelinePanel() {
             );
           })}
         </div>
+        <div className="tp-caption-track" onPointerDown={handleCaptionTrackPointerDown}>
+          {project.captions.map((seg) => {
+            const left = (seg.startMs / totalMs) * 100;
+            const width = ((seg.endMs - seg.startMs) / totalMs) * 100;
+            return (
+              <div
+                key={seg.id}
+                className={`tp-caption-block${seg.id === selectedCaptionId ? ' selected' : ''}`}
+                style={{ left: `${left}%`, width: `${width}%` }}
+                onPointerDown={(e) => startCaptionDrag(e, seg, 'move')}
+                onPointerMove={handleCaptionPointerMove}
+                onPointerUp={handleCaptionPointerUp}
+                onPointerCancel={handleCaptionPointerUp}
+              >
+                <div
+                  className="tp-caption-handle tp-caption-handle-left"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    startCaptionDrag(e, seg, 'left');
+                  }}
+                />
+                <span className="tp-caption-label">{seg.text}</span>
+                <div
+                  className="tp-caption-handle tp-caption-handle-right"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    startCaptionDrag(e, seg, 'right');
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
         <div
           className="tp-playhead"
           style={{ left: `${clamp((currentTimeMs / totalMs) * 100, 0, 100)}%` }}
@@ -689,8 +834,42 @@ export default function TimelinePanel() {
             </span>
             <button
               type="button"
+              className="btn tp-autozoom-btn"
+              disabled={!selectedClipSource?.telemetry?.length}
+              title={
+                selectedClipSource?.telemetry?.length
+                  ? 'Generate zoom segments from this clip’s pointer telemetry'
+                  : "No pointer telemetry on this clip's source"
+              }
+              onClick={handleAutoZoom}
+            >
+              Auto-zoom
+            </button>
+            {autoZoomFeedback && <span className="tp-hint tp-autozoom-feedback">{autoZoomFeedback}</span>}
+            <button
+              type="button"
               className="btn tp-delete-btn"
               onClick={() => removeClip(selectedClip.id)}
+            >
+              Delete
+            </button>
+          </>
+        ) : selectedCaption ? (
+          <>
+            <input
+              type="text"
+              className="text-input tp-caption-input"
+              placeholder="Caption text"
+              value={selectedCaption.text}
+              onChange={(e) => updateCaption(selectedCaption.id, { text: e.target.value })}
+            />
+            <span className="tp-hint tp-trim-readout">
+              {formatClock(selectedCaption.startMs)} – {formatClock(selectedCaption.endMs)}
+            </span>
+            <button
+              type="button"
+              className="btn tp-delete-btn"
+              onClick={() => removeCaption(selectedCaption.id)}
             >
               Delete
             </button>

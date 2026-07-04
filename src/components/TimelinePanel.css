@@ -1,12 +1,17 @@
 .tp-panel {
   display: flex;
-  height: 146px;
+  /* Ruler (24) + clip track (34) + zoom track (36) + caption track (32), plus
+     the tp-strip's 3 inter-row gaps (6px each) and 8px top/bottom padding. */
+  height: 184px;
   flex-shrink: 0;
   border-top: 1px solid var(--panel-border);
   background: var(--panel);
   /* Brighter accent variant for the chain indicator, so linked zoom edges
      read as distinct from the plain selection outline (var(--accent)). */
   --accent-bright: #a7bcff;
+  /* Amber accent for the caption track, kept visually distinct from the
+     blue zoom track and the green/purple clip track. */
+  --accent-caption: #ffc466;
 }
 
 .tp-actions {
@@ -271,6 +276,63 @@
   right: 0;
 }
 
+.tp-caption-track {
+  position: relative;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  touch-action: none;
+}
+
+.tp-caption-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: rgba(255, 196, 102, 0.22);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.tp-caption-block.selected {
+  border-color: var(--accent-caption);
+}
+
+.tp-caption-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
+}
+
+.tp-caption-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.tp-caption-handle-left {
+  left: 0;
+}
+
+.tp-caption-handle-right {
+  right: 0;
+}
+
 .tp-playhead {
   position: absolute;
   top: 0;
@@ -371,6 +433,22 @@
   white-space: nowrap;
 }
 
+.tp-autozoom-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.tp-autozoom-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tp-autozoom-feedback {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--accent-bright);
+}
+
 @media (max-width: 960px) {
   .tp-panel {
     height: auto;
@@ -404,7 +482,8 @@
 
 @media (max-width: 700px) {
   .tp-track,
-  .tp-clip-track {
+  .tp-clip-track,
+  .tp-caption-track {
     height: 40px;
   }
 
@@ -422,7 +501,8 @@
     height: 44px;
   }
 
-  .tp-delete-btn {
+  .tp-delete-btn,
+  .tp-autozoom-btn {
     width: 100%;
     min-height: 44px;
   }
