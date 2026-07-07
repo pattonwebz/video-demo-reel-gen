@@ -6,6 +6,7 @@ import {
   CanvasSource,
   EncodedAudioPacketSource,
   EncodedPacketSink,
+  getFirstEncodableAudioCodec,
   Input,
   Mp4OutputFormat,
   Output,
@@ -267,7 +268,16 @@ async function prepareAudioMix(
   }
   const rendered = await mixCtx.startRendering();
 
-  const source = new AudioBufferSource({ codec: 'aac', bitrate: AUDIO_BITRATE });
+  // Not every platform can encode AAC via WebCodecs (Linux Chrome can't);
+  // fall back to opus-in-mp4 (VLC/Chrome fine, QuickTime won't play it)
+  // rather than throwing away the whole export.
+  const codec = await getFirstEncodableAudioCodec(['aac', 'opus'], {
+    numberOfChannels: 2,
+    sampleRate: MIX_SAMPLE_RATE,
+  });
+  if (!codec) return null; // no encodable audio codec at all — export video-only
+
+  const source = new AudioBufferSource({ codec, bitrate: AUDIO_BITRATE });
   output.addAudioTrack(source);
   return {
     pump: async () => {
