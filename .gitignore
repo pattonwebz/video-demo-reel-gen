@@ -3,6 +3,7 @@ dist/
 *.local
 .DS_Store
 test-output/
+runs/
 .idea/
 # Internal development & planning notes (kept locally only)
 docs-local/
